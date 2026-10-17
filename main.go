@@ -138,14 +138,11 @@ func main() {
 			"React naturally to Nelly's awkwardness without making her completely combust",
 		},
 	}
-	zackStatus := actor.Status{
-		Mood: "Mildly bewildered, dryly amused, assessing the disaster",
-		Vitals: map[string]string{
-			"Energy":          "Normal",
-			"Awkwardness Bar": "Rising",
-		},
-	}
-	zackMind := actor.New(zackProfile, actor.WithStatus(zackStatus))
+	zackAttrs := actor.NewAttributes()
+	_ = zackAttrs.Set("mood", "Mildly bewildered, dryly amused, assessing the disaster")
+	_ = zackAttrs.Set("arousal", "normal")
+	_ = zackAttrs.Set("Awkwardness Bar", "Rising")
+	zackMind := actor.New(zackProfile, actor.WithAttributes(zackAttrs))
 
 	// Seed Zack's initial thoughts
 	zackMind.AddThought(actor.Thought{
@@ -216,15 +213,13 @@ func main() {
 		},
 		Background: "Lives in subsidized couple housing. Her ex moved out months ago, but she couldn't afford to report it. Verification is approaching, and Mia dragged Zack in as her temporary fake boyfriend.",
 	}
-	nellyStatus := actor.Status{
-		Mood: "Deeply flustered, overthinking every syllable, gripping hoodie sleeves",
-		Vitals: map[string]string{
-			"Heart Rate":     "125 bpm",
-			"Social Battery": "12%",
-			"Face Redness":   "Maximum",
-		},
-	}
-	nellyMind := actor.New(nellyProfile, actor.WithStatus(nellyStatus))
+	nellyAttrs := actor.NewAttributes()
+	_ = nellyAttrs.Set("mood", "Deeply flustered, overthinking every syllable, gripping hoodie sleeves")
+	_ = nellyAttrs.Set("arousal", "high")
+	_ = nellyAttrs.Set("Heart Rate", "125 bpm")
+	_ = nellyAttrs.Set("Social Battery", "12%")
+	_ = nellyAttrs.Set("Face Redness", "Maximum")
+	nellyMind := actor.New(nellyProfile, actor.WithAttributes(nellyAttrs))
 
 	// Seed Nelly's state of mind
 	nellyMind.AddThought(actor.Thought{
@@ -267,14 +262,12 @@ func main() {
 		},
 		Background: "Close friend of both Zack and Nelly. Sees zero moral issue with roping Zack into a fake relationship to save Nelly's lease.",
 	}
-	miaStatus := actor.Status{
-		Mood: "Cheerfully detached, hungry, highly entertained",
-		Vitals: map[string]string{
-			"Stress Level": "0%",
-			"Appetite":     "Snack hunting",
-		},
-	}
-	miaMind := actor.New(miaProfile, actor.WithStatus(miaStatus))
+	miaAttrs := actor.NewAttributes()
+	_ = miaAttrs.Set("mood", "Cheerfully detached, hungry, highly entertained")
+	_ = miaAttrs.Set("arousal", "normal")
+	_ = miaAttrs.Set("Stress Level", "0%")
+	_ = miaAttrs.Set("Appetite", "Snack hunting")
+	miaMind := actor.New(miaProfile, actor.WithAttributes(miaAttrs))
 
 	// Seed Mia's state of mind
 	miaMind.AddThought(actor.Thought{
@@ -328,34 +321,44 @@ func main() {
 	fmt.Println("==================================================")
 
 	_, err := world.Run(ctx, *maxTicks, func(report sim.TickReport) {
+		targetsInfo := ""
+		if len(report.Reaction.Action.Targets) > 0 {
+			targetsInfo = fmt.Sprintf(" -> [%s]", strings.Join(report.Reaction.Action.Targets, ", "))
+		}
+
 		if *playMode && report.ActorID == "zack" {
 			// In interactive play mode, show clean referee resolution for Zack
-			fmt.Printf("\n[Your Action] %s: %s\n", report.Reaction.Action.Type, report.Reaction.Action.Description)
-			if report.Ruling != nil {
-				fmt.Printf("[Arbiter Ruling: %s] %s\n",
-					strings.ToUpper(string(report.Ruling.Outcome)), report.Ruling.Resolution)
+			fmt.Printf("\n[Your Action] (%s%s): %s\n", report.Reaction.Action.Type, targetsInfo, report.Reaction.Action.Action)
+			if report.SceneRuling != nil {
+				fmt.Printf("[Scene Resolution (%s)]: %s\n", report.SceneRuling.SceneID, report.SceneRuling.Resolution)
 			}
 			return
 		}
 
-		fmt.Printf("\n>>> [TICK %d | %s] Turn: %s (%s) <<<\n",
-			report.Tick, report.Timestamp, report.ActorName, report.ActorID)
+		fmt.Printf("\n>>> [TICK %d | %s | Scene: %s] Turn: %s (%s) <<<\n",
+			report.Tick, report.Timestamp, report.SceneID, report.ActorName, report.ActorID)
 
 		if report.Reaction.Cognition != "" {
 			fmt.Printf("\n--- Private Cognition (Thinking Tokens) ---\n%s\n", report.Reaction.Cognition)
 		}
 
-		fmt.Printf("\n--- Manifest Turn ---\nType:   %s\nAction: %s\n",
-			report.Reaction.Action.Type, report.Reaction.Action.Description)
+		fmt.Printf("\n--- Manifest Turn ---\nType:   %s%s\nAction: %s\n",
+			report.Reaction.Action.Type, targetsInfo, report.Reaction.Action.Action)
 
-		if report.Ruling != nil {
-			fmt.Printf("\n--- Arbiter Verdict ---\nOutcome:      %s (Luck: %.2f)\nResolution:   %s\n",
-				strings.ToUpper(string(report.Ruling.Outcome)), report.Ruling.Luck, report.Ruling.Resolution)
-			if report.Ruling.ObserverPerception != "" {
-				fmt.Printf("Perceived:    %s\n", report.Ruling.ObserverPerception)
+		if report.SceneRuling != nil {
+			fmt.Printf("\n--- Scene Arbiter Ruling (%s) ---\nResolution:   %s\n",
+				report.SceneRuling.SceneID, report.SceneRuling.Resolution)
+			for _, v := range report.SceneRuling.Verdicts {
+				if v.ActorID == report.ActorID {
+					fmt.Printf("Verdict:      %s (outcome: %s)\n", v.Verdict, v.Outcome)
+					if v.RemainingIntent != "" {
+						fmt.Printf("Remaining:    %s\n", v.RemainingIntent)
+					}
+					break
+				}
 			}
-			if len(report.Ruling.AppliedEffects) > 0 {
-				fmt.Printf("Mutations:    %d applied\n", len(report.Ruling.AppliedEffects))
+			if len(report.SceneRuling.AppliedEffects) > 0 {
+				fmt.Printf("Mutations:    %d applied\n", len(report.SceneRuling.AppliedEffects))
 			}
 		}
 

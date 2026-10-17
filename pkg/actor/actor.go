@@ -41,10 +41,10 @@ func WithAPI(baseURL, apiKey string) Option {
 	}
 }
 
-// WithStatus sets the initial physical/mental status of the actor.
-func WithStatus(status Status) Option {
+// WithAttributes sets the initial dynamic attributes of the actor.
+func WithAttributes(attrs Attributes) Option {
 	return func(a *Actor) {
-		a.Status = status
+		a.Attributes = attrs
 	}
 }
 
@@ -72,7 +72,7 @@ func WithSystemPrompt(prompt SystemPrompt) Option {
 // Actor represents an autonomous, subjective entity in the simulation.
 type Actor struct {
 	Profile       Profile
-	Status        Status
+	Attributes    Attributes
 	Memory        *Memory
 	SystemPrompts []SystemPrompt
 
@@ -86,6 +86,7 @@ type Actor struct {
 func New(profile Profile, opts ...Option) *Actor {
 	a := &Actor{
 		Profile:         profile,
+		Attributes:      NewAttributes(),
 		Memory:          NewMemory(),
 		SystemPrompts:   DefaultSystemPrompts(profile.Name),
 		model:           "gemini-3.5-flash-lite",
@@ -294,24 +295,17 @@ When thinking, write exclusively as %s's raw, unformatted stream of consciousnes
 		Content: profileContent,
 	})
 
-	// 2. Somatic & Internal Status
-	var vitalsKeys []string
-	for k := range a.Status.Vitals {
-		vitalsKeys = append(vitalsKeys, k)
+	// 2. Attributes & Internal State
+	var attrKeys []string
+	for k := range a.Attributes {
+		attrKeys = append(attrKeys, k)
 	}
-	sort.Strings(vitalsKeys)
-	var vitals []string
-	for _, k := range vitalsKeys {
-		vitals = append(vitals, fmt.Sprintf("  * %s: %s", k, a.Status.Vitals[k]))
+	sort.Strings(attrKeys)
+	var attrLines []string
+	for _, k := range attrKeys {
+		attrLines = append(attrLines, fmt.Sprintf("  * %s: %s", k, a.Attributes[k].Value))
 	}
-	vitalsText := strings.Join(vitals, "\n")
-	if vitalsText != "" {
-		vitalsText = "\n- Vitals:\n" + vitalsText
-	}
-
-	statusContent := fmt.Sprintf(`CURRENT INTERNAL STATUS:
-- Emotional State: %s%s`,
-		a.Status.Mood, vitalsText)
+	statusContent := fmt.Sprintf("CURRENT ATTRIBUTES:\n%s", strings.Join(attrLines, "\n"))
 
 	msgs = append(msgs, llm.Message{
 		Role:    llm.Developer,

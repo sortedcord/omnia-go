@@ -155,8 +155,8 @@ func (h *HumanController) interpret(ctx context.Context, mind *actor.Actor, turn
 	trimmed := strings.TrimSpace(rawInput)
 	if trimmed == "" {
 		return actor.Action{
-			Type:        actor.Wait,
-			Description: "Hold position and observe.",
+			Type:   actor.Wait,
+			Action: "Hold position and observe.",
 		}, nil
 	}
 
@@ -170,7 +170,8 @@ A human player is controlling the character "%s".
 Convert the player's natural language input into a structured action JSON matching this schema:
 {
   "action_type": "speak" | "act" | "wait",
-  "action": "<interpreted description>"
+  "action": "<interpreted description>",
+  "targets": ["<name of person or entity addressed or targeted>"]
 }
 
 RULES:
@@ -199,16 +200,16 @@ RULES:
 	if err != nil {
 		// Fallback: default to physical act with the raw string
 		return actor.Action{
-			Type:        actor.Act,
-			Description: trimmed,
+			Type:   actor.Act,
+			Action: trimmed,
 		}, nil
 	}
 
 	var action actor.Action
 	if err := llm.DecodeJSON(resp.Content, resp.ReasoningContent, &action); err != nil {
 		return actor.Action{
-			Type:        actor.Act,
-			Description: trimmed,
+			Type:   actor.Act,
+			Action: trimmed,
 		}, nil
 	}
 

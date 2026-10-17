@@ -6,30 +6,21 @@ import (
 	"strings"
 	"time"
 
+	"omnia.adityagupta.dev/pkg/actor"
 	"omnia.adityagupta.dev/pkg/llm"
-)
-
-// OutcomeType represents the Arbiter's verdict on an attempted action.
-type OutcomeType string
-
-const (
-	OutcomeSuccess   OutcomeType = "success"     // Action succeeded fully as attempted
-	OutcomePartial   OutcomeType = "partial"     // Action made progress but was constrained or incomplete
-	OutcomeFailure   OutcomeType = "failure"     // Action failed cleanly without disaster
-	OutcomeMishap    OutcomeType = "mishap"      // Action failed with a blunder, fumble, or self-inflicted complication
-	OutcomeInterrupt OutcomeType = "interrupted" // Action was cut short mid-stride by an obstacle or external event
 )
 
 // EffectType represents a valid mutation operator on the world state.
 type EffectType string
 
 const (
-	EffectMove         EffectType = "move"          // Reparents an entity: entity_id, parent_id, relation, placement
-	EffectSetCondition EffectType = "set_condition" // Updates space condition: entity_id, key, value
-	EffectSetPortal    EffectType = "set_portal"    // Updates portal state: entity_id, closed, locked
-	EffectSetVital     EffectType = "set_vital"     // Updates actor vitals: entity_id, key, value
-	EffectSetOpen      EffectType = "set_open"      // Updates container openness: entity_id, open
-	EffectReveal       EffectType = "reveal"        // Clears concealment on an entity: entity_id
+	EffectMove            EffectType = "move"             // Reparents an entity: entity_id, parent_id, relation, placement
+	EffectSetCondition    EffectType = "set_condition"    // Updates space condition: entity_id, key, value
+	EffectSetPortal       EffectType = "set_portal"       // Updates portal state: entity_id, closed, locked
+	EffectSetAttribute    EffectType = "set_attribute"    // Updates actor attribute: entity_id, key, value
+	EffectRemoveAttribute EffectType = "remove_attribute" // Removes non-core attribute: entity_id, key
+	EffectSetOpen         EffectType = "set_open"         // Updates container openness: entity_id, open
+	EffectReveal          EffectType = "reveal"           // Clears concealment on an entity: entity_id
 )
 
 // Effect is an atomic world-state mutation commanded by the Arbiter.
@@ -46,42 +37,57 @@ type Effect struct {
 	Open      *bool      `json:"open,omitempty"`
 }
 
-// Adjudication packages everything the Arbiter needs to referee an actor's declared intent.
-type Adjudication struct {
+// ActorIntent packages an actor's declared intent for scene adjudication.
+type ActorIntent struct {
+	ActorID     EntityID          `json:"actor_id"`
+	ActorName   string            `json:"actor_name"`
+	ActionType  actor.ActionType  `json:"action_type"`
+	ActionText  string            `json:"action_text"`
+	Targets     []EntityID        `json:"targets,omitempty"`
+	Spontaneity float64           `json:"spontaneity"`
+	Luck        float64           `json:"luck"`
+	Attributes  map[string]string `json:"attributes,omitempty"`
+}
+
+// SceneAdjudication packages all concurrent actor intents and scene context for the Arbiter.
+type SceneAdjudication struct {
+	SceneID         SceneID
 	Tick            int
 	Timestamp       string
-	ActorID         EntityID
-	ActorName       string
-	ActorVitals     map[string]string
-	ActorMood       string
-	Intent          string
-	WorldState      string   // Objective, unfiltered description of the room and all entities
-	RecentEvents    []string // Chronological recent occurrences in this room
-	Luck            float64  // Seeded random roll between 0.00 (terrible) and 1.00 (flawless)
+	Intents         []ActorIntent
+	WorldState      string   // Objective, unfiltered description of the scene's spaces and entities
+	SceneEvents     []string // Chronological recent occurrences in this scene
+	GlobalEvents    []string // Digest of recent events across the wider simulation
 	TickDurationSec int
 }
 
-// Ruling is the Arbiter's authoritative resolution of an attempted action.
-type Ruling struct {
-	Outcome            OutcomeType   `json:"outcome"`
-	Resolution         string        `json:"resolution"`          // Objective third-person canonical truth
-	ActorPerception    string        `json:"actor_perception"`    // Second-person subjective experience for the acting actor
-	ObserverPerception string        `json:"observer_perception"` // Third-person sensory description for co-present onlookers
-	RemainingIntent    string        `json:"remaining_intent"`    // Unfinished trajectory to carry forward to the next tick
-	Effects            []Effect      `json:"effects,omitempty"`   // Requested world-state mutations
-	Luck               float64       `json:"-"`
-	AppliedEffects     []Effect      `json:"-"`
-	RejectedEffects    []string      `json:"-"`
-	Usage              llm.Usage     `json:"-"`
-	Duration           time.Duration `json:"-"`
+// IntentVerdict provides the referee's judgment on an individual actor's intent.
+type IntentVerdict struct {
+	ActorID         EntityID `json:"actor_id"`
+	Verdict         string   `json:"verdict"` // as_intended | altered | preempted
+	Outcome         string   `json:"outcome"` // success | partial | failure | mishap | interrupted
+	RemainingIntent string   `json:"remaining_intent,omitempty"`
 }
 
-// Arbiter defines the contract for resolving subjective intent into objective reality.
+// SceneRuling is the Arbiter's authoritative resolution of all concurrent actions in a scene.
+type SceneRuling struct {
+	SceneID         SceneID         `json:"scene_id"`
+	Verdicts        []IntentVerdict `json:"verdicts"`
+	ExecutionOrder  []EntityID      `json:"execution_order"` // Order in which actions physically materialized
+	Resolution      string          `json:"resolution"`      // Objective third-person canonical truth of the scene
+	Effects         []Effect        `json:"effects,omitempty"`
+	AppliedEffects  []Effect        `json:"-"`
+	RejectedEffects []string        `json:"-"`
+	Usage           llm.Usage       `json:"-"`
+	Duration        time.Duration   `json:"-"`
+}
+
+// Arbiter defines the contract for refereeing all concurrent actor intents in a scene.
 type Arbiter interface {
-	Resolve(ctx context.Context, adj Adjudication) (*Ruling, error)
+	ResolveScene(ctx context.Context, adj SceneAdjudication) (*SceneRuling, error)
 }
 
-// LLMArbiter implements Arbiter via chat completions.
+// LLMArbiter implements Arbiter using chat completions.
 type LLMArbiter struct {
 	client llm.Client
 	model  string
@@ -98,35 +104,34 @@ func NewLLMArbiter(client llm.Client, model string) *LLMArbiter {
 	}
 }
 
-// Resolve adjudicates an attempted action and returns the authoritative ruling.
-func (a *LLMArbiter) Resolve(ctx context.Context, adj Adjudication) (*Ruling, error) {
-	systemPrompt := fmt.Sprintf(`You are THE ARBITER: an impartial, physically realistic simulation referee and physics engine.
-Actors in the simulation only declare their INTENT (what they attempt to do). You determine what ACTUALLY HAPPENS.
+// ResolveScene refereees all concurrent actor intents in a scene and returns the authoritative ruling.
+func (a *LLMArbiter) ResolveScene(ctx context.Context, adj SceneAdjudication) (*SceneRuling, error) {
+	start := time.Now()
 
-CORE REFEREE RULES:
-1. Pacing & Time: Each simulation tick represents %d seconds. An actor can only accomplish what physically fits within this window. If their intent describes a multi-step journey (e.g. "Walk to the kitchen and make coffee"), resolve only the FIRST %d seconds of progress, and put the rest into "remaining_intent".
-2. No God-Moding: An actor cannot decree success against hazardous or mechanical obstacles. Evaluate their physical state (vitals, fatigue, mood), ambient hazards (alarms, fires, depressurization), and the provided Luck roll.
-3. Luck Calibration (0.00 to 1.00):
-   - High (>= 0.80): Fortune favors the attempt; close calls break the actor's way.
-   - Normal (0.25 to 0.79): Success depends strictly on physical plausibility, gear, and environmental difficulty.
-   - Low (<= 0.24): Complications, slips, or equipment snags are likely under stressful conditions.
-   - Critical Low (<= 0.10): If the attempt is hazardous or rushed, a genuine mishap or fumble occurs (e.g. dropping a tool, stumbling).
-   - Trivial, safe actions (e.g. looking around, standing up) always succeed regardless of luck.
-4. Output Schema: You MUST respond ONLY with a valid JSON object matching this schema:
+	systemPrompt := fmt.Sprintf(`You are THE ARBITER: an impartial, physically realistic simulation referee and physics engine.
+Actors in this scene submitted their actions SIMULTANEOUSLY. You determine what ACTUALLY HAPPENS.
+
+OUTPUT REQUIREMENT:
+You MUST respond ONLY with a valid JSON object matching this schema:
 {
-  "outcome": "success" | "partial" | "failure" | "mishap" | "interrupted",
-  "resolution": "<brief objective third-person ground truth of what physically occurred in past tense>",
-  "actor_perception": "<second-person sensory description of what the actor felt, heard, saw, or experienced>",
-  "observer_perception": "<third-person description of what co-present onlookers in the room witness, or empty string if silent/invisible>",
-  "remaining_intent": "<any uncompleted portion of the actor's declared intent, or empty string if fully resolved>",
+  "execution_order": ["<actor_id_1>", "<actor_id_2>"],
+  "verdicts": [
+    {
+      "actor_id": "<exact_actor_id>",
+      "verdict": "as_intended" | "altered" | "preempted",
+      "outcome": "success" | "partial" | "failure" | "mishap" | "interrupted",
+      "remaining_intent": "<any uncompleted portion of the intent, or empty string>"
+    }
+  ],
+  "resolution": "<concise objective third-person ground truth of everything that physically happened in the scene>",
   "effects": [
     {
-      "type": "move" | "set_condition" | "set_portal" | "set_vital" | "set_open" | "reveal",
+      "type": "move" | "set_condition" | "set_portal" | "set_attribute" | "remove_attribute" | "set_open" | "reveal",
       "entity_id": "<exact entity ID from world state>",
       "parent_id": "<exact target parent entity ID for move>",
       "relation": "in" | "on" | "under" | "behind" | "worn" | "held" | "seated",
       "placement": "<optional placement description>",
-      "key": "<condition or vital name>",
+      "key": "<condition or attribute name>",
       "value": "<new value>",
       "closed": true | false,
       "locked": true | false,
@@ -135,38 +140,82 @@ CORE REFEREE RULES:
   ]
 }
 
-EFFECTS RULES:
-- Only emit effects when something actually changes state.
-- "move": Moves an entity (item or actor) to a new parent. Use relation "held" (in hands), "worn" (on body), "on" (floor/surface), "in" (container/pocket/cabin).
-- "set_condition": Changes an environmental condition on the room space. An empty value deletes the condition.
-- "set_portal": Sets "closed" or "locked" on a portal (door/hatch).
-- "set_vital": Changes an actor's vital stat (e.g. "Heart Rate": "Racing").
-- "set_open": Opens or closes an enterable or container space (e.g. vehicle trunk, toolbox).
-- "reveal": Sets concealed=false on an entity that has been uncovered or searched.
-- CRITICAL: You must ONLY reference exact entity IDs listed in the WORLD STATE. Never invent new entity IDs.`,
-		adj.TickDurationSec, adj.TickDurationSec)
+REFEREE RULES:
+1. Simultaneity & Precedence:
+   - Actors acted concurrently this tick (%ds window).
+   - Use Spontaneity scores and Luck rolls as guidance for who acts first or wins contests.
+   - If two actors collide (e.g. both reaching for the same item), the higher spontaneity/reflexes and physical position wins; the second actor's action is "altered" or "preempted".
+   - If an actor was interrupted before completing their action, mark verdict as "altered" or "preempted" with outcome "interrupted", and store unfinished action in "remaining_intent".
+2. Verdicts:
+   - "as_intended": Action proceeded without major disruption.
+   - "altered": Action was forced to adapt, deflected, or partially interrupted by another actor's action or environment.
+   - "preempted": The situation changed so fast the action never got off the ground.
+3. Outcome Calibration:
+   - "success": Attempt succeeded as planned.
+   - "partial": Progress made, but bounded by time or partial interference.
+   - "failure": Failed cleanly without disaster.
+   - "mishap": Physical blunder, slip, or fumble (especially with low Luck <= 0.20 or stressful conditions).
+   - "interrupted": Cut short mid-stride.
+4. Objective Resolution Only:
+   - Describe purely the objective physical ground truth of the scene in past tense.
+   - Do NOT write subjective second-person text (the Broadcaster handles subjective perceptions).
+5. Effects Whitelist:
+   - "move": Reparents entity.
+   - "set_condition": Updates room condition (empty value deletes).
+   - "set_portal": Sets closed/locked on portals.
+   - "set_attribute": Updates an actor's attribute (e.g. mood, arousal, Social Battery).
+   - "remove_attribute": Removes a non-core attribute.
+   - "set_open": Sets open=true/false on a container.
+   - "reveal": Sets concealed=false.
+   - NEVER invent new entity IDs. Only use IDs from the WORLD STATE.`,
+		adj.TickDurationSec)
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("TICK: %d | TIME: %s | DURATION: %ds\n", adj.Tick, adj.Timestamp, adj.TickDurationSec))
-	sb.WriteString(fmt.Sprintf("ACTOR: %s (ID: %s)\n", adj.ActorName, adj.ActorID))
-	sb.WriteString(fmt.Sprintf("EMOTIONAL STATE: %s\n", adj.ActorMood))
-	if len(adj.ActorVitals) > 0 {
-		sb.WriteString("VITALS:\n")
-		for k, v := range adj.ActorVitals {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", k, v))
+	sb.WriteString(fmt.Sprintf("SCENE: %s | TICK: %d | TIME: %s | DURATION: %ds\n\n",
+		adj.SceneID, adj.Tick, adj.Timestamp, adj.TickDurationSec))
+
+	sb.WriteString("CONCURRENT ACTOR INTENTS (Submitted simultaneously this tick):\n")
+	for _, in := range adj.Intents {
+		targetsStr := "none"
+		if len(in.Targets) > 0 {
+			var tStrs []string
+			for _, t := range in.Targets {
+				tStrs = append(tStrs, string(t))
+			}
+			targetsStr = strings.Join(tStrs, ", ")
 		}
+
+		attrsStr := ""
+		if len(in.Attributes) > 0 {
+			var aStrs []string
+			for k, v := range in.Attributes {
+				aStrs = append(aStrs, fmt.Sprintf("%s=%s", k, v))
+			}
+			attrsStr = fmt.Sprintf(" | attrs: [%s]", strings.Join(aStrs, ", "))
+		}
+
+		sb.WriteString(fmt.Sprintf("- Actor: %s (ID: %s) | Type: %s | Spontaneity: %.2f | Luck: %.2f | Targets: [%s]%s\n  Intent: %q\n",
+			in.ActorName, in.ActorID, in.ActionType, in.Spontaneity, in.Luck, targetsStr, attrsStr, in.ActionText))
 	}
-	sb.WriteString(fmt.Sprintf("LUCK ROLL: %.2f\n\n", adj.Luck))
-	sb.WriteString(fmt.Sprintf("ACTOR'S DECLARED INTENT:\n%q\n\n", adj.Intent))
-	sb.WriteString("OBJECTIVE WORLD STATE (Ground Truth of Current Area):\n")
+
+	sb.WriteString("\nOBJECTIVE WORLD STATE (Ground Truth of Scene's Spaces):\n")
 	sb.WriteString(adj.WorldState)
 
-	if len(adj.RecentEvents) > 0 {
-		sb.WriteString("\n\nRECENT EVENTS IN THIS AREA:\n")
-		for _, ev := range adj.RecentEvents {
+	if len(adj.SceneEvents) > 0 {
+		sb.WriteString("\n\nRECENT EVENTS IN THIS SCENE:\n")
+		for _, ev := range adj.SceneEvents {
 			sb.WriteString(fmt.Sprintf("- %s\n", ev))
 		}
 	}
+
+	if len(adj.GlobalEvents) > 0 {
+		sb.WriteString("\nRECENT GLOBAL EVENTS (Across Simulation):\n")
+		for _, ev := range adj.GlobalEvents {
+			sb.WriteString(fmt.Sprintf("- %s\n", ev))
+		}
+	}
+
+	sb.WriteString("\nAdjudicate the scene:")
 
 	req := llm.ChatRequest{
 		Model: a.model,
@@ -179,28 +228,19 @@ EFFECTS RULES:
 		IncludeReasoning: true,
 	}
 
-	start := time.Now()
 	resp, err := a.client.ChatCompletion(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("arbiter: chat completion failed: %w", err)
+		return nil, fmt.Errorf("arbiter: chat completion failed for scene %q: %w", adj.SceneID, err)
 	}
 
-	var ruling Ruling
+	var ruling SceneRuling
 	if err := llm.DecodeJSON(resp.Content, resp.ReasoningContent, &ruling); err != nil {
-		return nil, fmt.Errorf("arbiter: failed to decode ruling JSON: %w (content: %q)", err, resp.Content)
+		return nil, fmt.Errorf("arbiter: failed to decode scene ruling JSON: %w (content: %q)", err, resp.Content)
 	}
 
+	ruling.SceneID = adj.SceneID
 	ruling.Duration = time.Since(start)
 	ruling.Usage = resp.Usage
-	ruling.Luck = adj.Luck
-
-	// Validate outcome
-	switch ruling.Outcome {
-	case OutcomeSuccess, OutcomePartial, OutcomeFailure, OutcomeMishap, OutcomeInterrupt:
-		// Valid
-	default:
-		ruling.Outcome = OutcomePartial
-	}
 
 	return &ruling, nil
 }

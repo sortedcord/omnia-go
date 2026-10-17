@@ -3,6 +3,7 @@ package actor
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"omnia.adityagupta.dev/pkg/llm"
@@ -55,8 +56,9 @@ func (a *ActionType) UnmarshalJSON(data []byte) error {
 
 // Action is the structured external manifestation emitted by an actor into the world.
 type Action struct {
-	Type        ActionType `json:"action_type"`
-	Description string     `json:"action"`
+	Type    ActionType `json:"action_type"`
+	Action  string     `json:"action"`
+	Targets []string   `json:"targets,omitempty"` // Names of intended addressees or interactive targets
 }
 
 // Profile defines the immutable or slow-evolving identity of the actor.
@@ -68,11 +70,90 @@ type Profile struct {
 	Background  string
 }
 
-// Status represents the actor's internal somatic and emotional state.
-// Spatial location and inventory are derived from the simulation's entity tree.
-type Status struct {
-	Mood   string
-	Vitals map[string]string // e.g. "Oxygen Reserve": "82%", "Weariness": "Moderate"
+// Attribute represents a dynamic somatic, psychological, or situational property of an actor.
+type Attribute struct {
+	Value   string   `json:"value"`
+	Allowed []string `json:"allowed,omitempty"` // Non-empty indicates an enum
+	Core    bool     `json:"core,omitempty"`    // Core attributes cannot be removed
+}
+
+// Attributes maps attribute keys to their values and constraints.
+type Attributes map[string]Attribute
+
+// NewAttributes initializes default core attributes (mood and arousal).
+func NewAttributes() Attributes {
+	attrs := make(Attributes)
+	attrs["mood"] = Attribute{
+		Value: "Neutral",
+		Core:  true,
+	}
+	attrs["arousal"] = Attribute{
+		Value:   "normal",
+		Allowed: []string{"low", "normal", "high"},
+		Core:    true,
+	}
+	return attrs
+}
+
+// Get retrieves the current string value of an attribute.
+func (a Attributes) Get(key string) (string, bool) {
+	attr, ok := a[key]
+	if !ok {
+		return "", false
+	}
+	return attr.Value, true
+}
+
+// Set mutates an attribute value, enforcing enum constraints if configured.
+func (a Attributes) Set(key, value string) error {
+	attr, exists := a[key]
+	if exists && len(attr.Allowed) > 0 {
+		valid := false
+		for _, allowed := range attr.Allowed {
+			if strings.EqualFold(allowed, value) {
+				valid = true
+				value = allowed
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("attributes: invalid value %q for enum attribute %q (allowed: %v)", value, key, attr.Allowed)
+		}
+	}
+	if exists {
+		attr.Value = value
+		a[key] = attr
+	} else {
+		a[key] = Attribute{Value: value}
+	}
+	return nil
+}
+
+// Remove deletes an attribute if it is not marked as Core.
+func (a Attributes) Remove(key string) error {
+	attr, ok := a[key]
+	if !ok {
+		return nil
+	}
+	if attr.Core {
+		return fmt.Errorf("attributes: cannot remove core attribute %q", key)
+	}
+	delete(a, key)
+	return nil
+}
+
+// Copy returns an isolated deep copy of the attributes map.
+func (a Attributes) Copy() Attributes {
+	out := make(Attributes, len(a))
+	for k, v := range a {
+		allowedCopy := append([]string(nil), v.Allowed...)
+		out[k] = Attribute{
+			Value:   v.Value,
+			Allowed: allowedCopy,
+			Core:    v.Core,
+		}
+	}
+	return out
 }
 
 // SensoryEvent represents an external event as subjectively perceived by this actor.

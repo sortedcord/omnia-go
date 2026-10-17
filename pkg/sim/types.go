@@ -66,6 +66,7 @@ type Event struct {
 	Tick        int       `json:"tick"`
 	Timestamp   string    `json:"timestamp"`
 	LocationID  EntityID  `json:"location_id"`
+	SceneID     SceneID   `json:"scene_id,omitempty"`
 	SourceID    EntityID  `json:"source_id,omitempty"`   // Empty for environmental/world events
 	SourceName  string    `json:"source_name,omitempty"` // Display name of source entity
 	Kind        EventKind `json:"kind"`
@@ -96,11 +97,12 @@ func (e Event) FormatForPerception() string {
 type TickReport struct {
 	Tick         int
 	Timestamp    string
+	SceneID      SceneID
 	ActorID      EntityID
 	ActorName    string
 	Stimulus     string
 	Reaction     *actor.Reaction
-	Ruling       *Ruling         // Set if an action was adjudicated by the Arbiter
+	SceneRuling  *SceneRuling    // The Arbiter's ruling for this actor's scene
 	Thoughts     []actor.Thought // Active thoughts selected into context for this turn
 	PriorDistill *DistillResult  // Results of background distillation from previous turn
 }

@@ -43,13 +43,14 @@ func DefaultActionSchema() SystemPrompt {
 Your final response MUST be ONLY a valid standard JSON object using double quotes (never single quotes) matching this schema:
 {
   "action_type": "speak" | "act" | "wait",
-  "action": "<description of what you say, what physical action you attempt, or why you wait>"
+  "action": "<description of what you say, what physical action you attempt, or why you wait>",
+  "targets": ["<name of person or entity you are addressing or targeting>"]
 }
 
 Action types:
-- "speak": Words spoken aloud that nearby entities can hear.
-- "act": What you physically attempt to do right now. Declare your intent/action (e.g. "Lunge toward the breaker box to flip the cutoff switch"), NOT the final outcome. The simulation physics will resolve whether and how your action succeeds.
-- "wait": Deliberately pausing, observing, or holding position (no external action or speech).`,
+- "speak": Words spoken aloud. Use "targets" to indicate who you are speaking to (leave empty if addressing everyone in the room).
+- "act": What you physically attempt to do right now. Declare your intent/action, NOT the final outcome. Use "targets" if your action interacts with specific entities or people.
+- "wait": Deliberately pausing, observing, or holding position (no external action or speech). Keep "targets" empty.`,
 	}
 }
 

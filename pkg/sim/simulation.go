@@ -23,6 +23,13 @@ func WithArbiter(a Arbiter) Option {
 	}
 }
 
+// WithBroadcaster configures the Scene Perception Broadcaster.
+func WithBroadcaster(b Broadcaster) Option {
+	return func(sim *Simulation) {
+		sim.Broadcaster = b
+	}
+}
+
 // WithDistiller configures the Thought Distiller for updating actor minds in the background.
 func WithDistiller(d ThoughtDistiller) Option {
 	return func(sim *Simulation) {
@@ -54,9 +61,16 @@ type Simulation struct {
 
 	// Physics & Resolution
 	Arbiter       Arbiter
+	Broadcaster   Broadcaster
 	RNG           *rand.Rand
 	Seed          int64
 	pendingIntent map[EntityID]string // actorID -> unfinished intent trajectory
+
+	// Dynamic Scenes
+	Scenes            map[SceneID]*Scene
+	SceneBonds        map[SceneID]SceneID // olderSceneID -> newerSceneID
+	ContestedEntities map[EntityID]bool
+	nextSceneID       int
 
 	// Thought Distillation
 	Distiller      ThoughtDistiller
@@ -85,20 +99,24 @@ func New(clock Clock, opts ...Option) *Simulation {
 	defaultLLM := llm.DefaultClient()
 
 	sim := &Simulation{
-		Clock:           clock,
-		Entities:        make(map[EntityID]*Entity),
-		FocusMap:        make(map[EntityID]map[EntityID]float64),
-		Summarizer:      NewLLMSummarizer(defaultLLM, "gemini-3.5-flash-lite"),
-		Arbiter:         NewLLMArbiter(defaultLLM, "gemini-3.5-flash-lite"),
-		Distiller:       NewLLMDistiller(defaultLLM, "gemini-3.5-flash-lite"),
-		Seed:            seed,
-		RNG:             rand.New(rand.NewSource(seed)),
-		pendingIntent:   make(map[EntityID]string),
-		pendingDistill:  make(map[EntityID]chan DistillResult),
-		lastDistill:     make(map[EntityID]*DistillResult),
-		EventLog:        make([]Event, 0),
-		inbox:           make(map[EntityID][]Event),
-		scheduledEvents: make(map[int][]Event),
+		Clock:             clock,
+		Entities:          make(map[EntityID]*Entity),
+		FocusMap:          make(map[EntityID]map[EntityID]float64),
+		Summarizer:        NewLLMSummarizer(defaultLLM, "gemini-3.5-flash-lite"),
+		Arbiter:           NewLLMArbiter(defaultLLM, "gemini-3.5-flash-lite"),
+		Broadcaster:       NewLLMBroadcaster(defaultLLM, "gemini-3.5-flash-lite"),
+		Distiller:         NewLLMDistiller(defaultLLM, "gemini-3.5-flash-lite"),
+		Seed:              seed,
+		RNG:               rand.New(rand.NewSource(seed)),
+		pendingIntent:     make(map[EntityID]string),
+		Scenes:            make(map[SceneID]*Scene),
+		SceneBonds:        make(map[SceneID]SceneID),
+		ContestedEntities: make(map[EntityID]bool),
+		pendingDistill:    make(map[EntityID]chan DistillResult),
+		lastDistill:       make(map[EntityID]*DistillResult),
+		EventLog:          make([]Event, 0),
+		inbox:             make(map[EntityID][]Event),
+		scheduledEvents:   make(map[int][]Event),
 	}
 
 	for _, opt := range opts {
@@ -261,13 +279,15 @@ func (s *Simulation) broadcastToSpaceLocked(spaceID EntityID, event Event, exclu
 
 // Step advances the simulation by one discrete tick:
 //  1. Ingests scheduled world occurrences and dispatches them to co-present actors.
-//  2. Collects all active actors (entities with Mind != nil and !Passive) that have pending inbox events.
-//  3. For each actor:
-//     a. Scans pending events to dynamically boost LOD focus on mentioned entities.
-//     b. Renders the surroundings and carried items via Level of Detail (LOD).
-//     c. Delivers the combined sensory input to the actor's Mind.React().
-//     d. Broadcasts manifest actions (speak/act) to co-present entities.
-//  4. Decays temporary focus boosts and advances the simulation tick counter.
+//  2. Partitions the simulation into dynamic scenes based on spatial topology and conflict bonds.
+//  3. Identifies active actors with pending inbox events; renders their LOD views and active thoughts.
+//  4. Deliberates concurrently across all woken actors (goroutines).
+//  5. Resolves target names into perceivable entity IDs and computes deterministic spontaneity scores.
+//  6. Adjudicates each active scene in parallel using its scene-local Arbiter.
+//  7. Applies world mutations in scene age order (oldest first), detecting boundary conflicts and bonding scenes.
+//  8. Broadcasters synthesize individualized second-person perceptions in parallel per scene.
+//  9. Delivers perceptions into inboxes (waking actors for next tick) and launches background thought distillers.
+//  10. Decays temporary focus boosts and advances the simulation tick counter.
 func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 	s.mu.Lock()
 	currentTick := s.Clock.TickCount
@@ -285,17 +305,25 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 		delete(s.scheduledEvents, currentTick)
 	}
 
-	// 2. Identify active minds with pending inbox events
-	type turnInfo struct {
-		entity  *Entity
-		spaceID EntityID
-		pending []Event
+	// 2. Build and update Scenes from spatial topology + active conflict bonds
+	scenes := s.buildScenesLocked(currentTick)
+
+	// 3. Identify active actors with pending inbox events
+	type candidateActor struct {
+		entity    *Entity
+		spaceID   EntityID
+		sceneID   SceneID
+		pending   []Event
+		view      RenderedPerception
+		relevant  map[string]float64
+		thoughts  string
+		selected  []actor.Thought
+		priorDist *DistillResult
 	}
 
-	var turns []turnInfo
+	var candidates []candidateActor
 	for id, entity := range s.Entities {
 		if entity.Controller == nil {
-			// Passive entity (no controller): clear any accumulated inbox
 			delete(s.inbox, id)
 			continue
 		}
@@ -307,151 +335,484 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			if loc != nil {
 				locID = loc.ID
 			}
-			turns = append(turns, turnInfo{
+			sc, _ := s.sceneForActorLocked(id)
+			scID := SceneID("")
+			if sc != nil {
+				scID = sc.ID
+			}
+			candidates = append(candidates, candidateActor{
 				entity:  entity,
 				spaceID: locID,
+				sceneID: scID,
 				pending: pending,
 			})
 		}
 	}
-
-	// Deterministic turn order (alphabetical by Entity ID)
-	sort.Slice(turns, func(i, j int) bool {
-		return turns[i].entity.ID < turns[j].entity.ID
-	})
 	s.mu.Unlock()
 
-	var reports []TickReport
-
-	// 3. Execute turns sequentially
-	for _, t := range turns {
-		// 3a. Await pending background distillation from previous turn for this actor
+	if len(candidates) == 0 {
 		s.mu.Lock()
-		distillChan, hasPendingDistill := s.pendingDistill[t.entity.ID]
-		delete(s.pendingDistill, t.entity.ID)
+		s.Clock.Advance(1)
+		s.mu.Unlock()
+		return nil, nil
+	}
+
+	// 4. Await prior distillations & prepare perception per candidate
+	for i := range candidates {
+		c := &candidates[i]
+		s.mu.Lock()
+		distillChan, hasPending := s.pendingDistill[c.entity.ID]
+		delete(s.pendingDistill, c.entity.ID)
 		s.mu.Unlock()
 
-		if hasPendingDistill && distillChan != nil {
+		if hasPending && distillChan != nil {
 			select {
 			case res := <-distillChan:
 				s.mu.Lock()
-				s.lastDistill[t.entity.ID] = &res
+				s.lastDistill[c.entity.ID] = &res
 				s.mu.Unlock()
 			case <-ctx.Done():
-				return reports, ctx.Err()
+				return nil, ctx.Err()
 			}
 		}
 
 		s.mu.RLock()
-		priorDistill := s.lastDistill[t.entity.ID]
+		c.priorDist = s.lastDistill[c.entity.ID]
 		s.mu.RUnlock()
 
-		// Scan incoming events for mentioned entities to boost focus before rendering LOD
 		var eventTexts []string
-		for _, ev := range t.pending {
+		for _, ev := range c.pending {
 			eventTexts = append(eventTexts, ev.Description)
 		}
-		fullEventText := strings.Join(eventTexts, " ")
-		s.ScanAndBoostMentions(t.entity.ID, fullEventText)
+		s.ScanAndBoostMentions(c.entity.ID, strings.Join(eventTexts, " "))
 
-		// Render surroundings and gear at the actor's current LOD focus
-		view, err := s.renderPerceptionView(ctx, t.entity.ID)
+		view, err := s.renderPerceptionView(ctx, c.entity.ID)
 		if err != nil {
-			return reports, fmt.Errorf("sim: failed to render perception for %q: %w", t.entity.Name, err)
+			return nil, fmt.Errorf("sim: failed to render perception for %q: %w", c.entity.Name, err)
 		}
+		c.view = view
 
-		// Build relevance map and teach perceivable entities to the actor
 		relevantMap := make(map[string]float64)
 		for seenID, lod := range view.Seen {
 			relevantMap[string(seenID)] = float64(lod)
 		}
 		s.mu.RLock()
-		if fmap := s.FocusMap[t.entity.ID]; fmap != nil {
+		if fmap := s.FocusMap[c.entity.ID]; fmap != nil {
 			for fID, boost := range fmap {
 				relevantMap[string(fID)] += boost
 			}
 		}
 		s.mu.RUnlock()
+		c.relevant = relevantMap
 
-		if t.entity.Mind != nil {
+		if c.entity.Mind != nil {
 			known := make(map[string]string)
 			for _, p := range view.Perceivable {
 				known[string(p.ID)] = p.Name
 			}
-			t.entity.Mind.LearnEntities(known)
+			c.entity.Mind.LearnEntities(known)
+			c.thoughts = c.entity.Mind.FormatThoughtContext(currentTick, relevantMap)
+			c.selected = c.entity.Mind.SelectThoughts(currentTick, relevantMap, 8)
 		}
+	}
 
-		// Compile thoughts context
-		thoughtsText := ""
-		var selectedThoughts []actor.Thought
-		if t.entity.Mind != nil {
-			thoughtsText = t.entity.Mind.FormatThoughtContext(currentTick, relevantMap)
-			selectedThoughts = t.entity.Mind.SelectThoughts(currentTick, relevantMap, 8)
-		}
+	// 5. PARALLEL DELIBERATION (Every woken actor decides concurrently)
+	type decisionResult struct {
+		candidate candidateActor
+		reaction  *actor.Reaction
+		err       error
+	}
 
-		// Compile the complete subjective stimulus
-		var sb strings.Builder
-		sb.WriteString("=== CURRENT SURROUNDINGS (Your Perspective) ===\n")
-		sb.WriteString(view.Text)
-		sb.WriteString("\n\n=== RECENT SENSORY INGRESS ===\n")
-		for i, ev := range t.pending {
-			if i > 0 {
-				sb.WriteString("\n")
+	decisions := make([]decisionResult, len(candidates))
+	var wg sync.WaitGroup
+
+	for i := range candidates {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			c := candidates[idx]
+
+			var sb strings.Builder
+			sb.WriteString("=== CURRENT SURROUNDINGS (Your Perspective) ===\n")
+			sb.WriteString(c.view.Text)
+			sb.WriteString("\n\n=== RECENT SENSORY INGRESS ===\n")
+			for j, ev := range c.pending {
+				if j > 0 {
+					sb.WriteString("\n")
+				}
+				sb.WriteString(ev.FormatForPerception())
 			}
-			sb.WriteString(ev.FormatForPerception())
+			stimulusText := sb.String()
+
+			turn := Turn{
+				ActorID:   c.entity.ID,
+				ActorName: c.entity.Name,
+				Tick:      currentTick,
+				Timestamp: currentTimestamp,
+				Stimulus:  stimulusText,
+				Relevant:  c.relevant,
+				Thoughts:  c.thoughts,
+			}
+
+			reaction, err := c.entity.Controller.Decide(ctx, c.entity.Mind, turn)
+			decisions[idx] = decisionResult{
+				candidate: c,
+				reaction:  reaction,
+				err:       err,
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	for _, d := range decisions {
+		if d.err != nil {
+			return nil, fmt.Errorf("sim: actor %q failed to decide: %w", d.candidate.entity.Name, d.err)
 		}
-		stimulusText := sb.String()
+	}
 
-		turn := Turn{
-			ActorID:   t.entity.ID,
-			ActorName: t.entity.Name,
-			Tick:      currentTick,
-			Timestamp: currentTimestamp,
-			Stimulus:  stimulusText,
-			Relevant:  relevantMap,
-			Thoughts:  thoughtsText,
+	// 6. TARGET RESOLUTION & SPONTANEITY SCORING
+	type resolvedTurn struct {
+		candidate   candidateActor
+		reaction    *actor.Reaction
+		targets     []EntityID
+		spontaneity float64
+		luck        float64
+	}
+
+	resolvedTurns := make([]resolvedTurn, len(decisions))
+	for i, d := range decisions {
+		resolvedTargets := ResolveTargets(d.reaction.Action.Targets, d.candidate.view.Perceivable)
+
+		var latestTrigger *Event
+		if len(d.candidate.pending) > 0 {
+			latestTrigger = &d.candidate.pending[len(d.candidate.pending)-1]
+		}
+		spontaneity := s.ComputeSpontaneity(d.candidate.entity.ID, currentTick, latestTrigger)
+
+		s.mu.Lock()
+		luck := s.RNG.Float64()
+		s.mu.Unlock()
+
+		resolvedTurns[i] = resolvedTurn{
+			candidate:   d.candidate,
+			reaction:    d.reaction,
+			targets:     resolvedTargets,
+			spontaneity: spontaneity,
+			luck:        luck,
 		}
 
-		reaction, err := t.entity.Controller.Decide(ctx, t.entity.Mind, turn)
-		if err != nil {
-			return reports, fmt.Errorf("sim: actor %q failed to decide on tick %d: %w", t.entity.Name, currentTick, err)
+		s.ScanAndBoostMentions(d.candidate.entity.ID, d.reaction.Action.Action)
+	}
+
+	// Group resolved turns by SceneID
+	sceneTurns := make(map[SceneID][]resolvedTurn)
+	for _, rt := range resolvedTurns {
+		scID := rt.candidate.sceneID
+		if scID == "" {
+			scID = "scene-default"
 		}
+		sceneTurns[scID] = append(sceneTurns[scID], rt)
+	}
 
-		// Also boost focus for any entities the actor referenced in their own action description
-		s.ScanAndBoostMentions(t.entity.ID, reaction.Action.Description)
+	// 7. PER-SCENE ARBITER ADJUDICATION (In Parallel)
+	type sceneAdjudicationResult struct {
+		sceneID SceneID
+		scene   *Scene
+		ruling  *SceneRuling
+		turns   []resolvedTurn
+		err     error
+	}
 
-		report := TickReport{
-			Tick:         currentTick,
-			Timestamp:    currentTimestamp,
-			ActorID:      t.entity.ID,
-			ActorName:    t.entity.Name,
-			Stimulus:     stimulusText,
-			Reaction:     reaction,
-			Thoughts:     selectedThoughts,
-			PriorDistill: priorDistill,
+	s.mu.RLock()
+	tickDur := int(s.Clock.TickDuration.Seconds())
+	if tickDur <= 0 {
+		tickDur = 10
+	}
+	recentGlobal := s.recentGlobalEventsLocked(6)
+	s.mu.RUnlock()
+
+	var arbiterWG sync.WaitGroup
+	adjResults := make([]sceneAdjudicationResult, 0, len(sceneTurns))
+	var adjMu sync.Mutex
+
+	for scID, turnsInScene := range sceneTurns {
+		arbiterWG.Add(1)
+		go func(sceneID SceneID, rTurns []resolvedTurn) {
+			defer arbiterWG.Done()
+
+			s.mu.RLock()
+			scene := s.Scenes[sceneID]
+			spaceIDs := []EntityID(nil)
+			if scene != nil {
+				spaceIDs = scene.SpaceIDs
+			}
+			worldState := s.renderObjectiveSpacesLocked(spaceIDs)
+			recentScene := s.recentSceneEventsLocked(spaceIDs, 5)
+
+			intents := make([]ActorIntent, len(rTurns))
+			for idx, rt := range rTurns {
+				intentText := rt.reaction.Action.Action
+				if prev := s.pendingIntent[rt.candidate.entity.ID]; prev != "" {
+					intentText = fmt.Sprintf("%s (continuing previous intent: %s)", intentText, prev)
+				}
+				attrMap := make(map[string]string)
+				if rt.candidate.entity.Mind != nil {
+					for k, v := range rt.candidate.entity.Mind.Attributes {
+						attrMap[k] = v.Value
+					}
+				}
+				intents[idx] = ActorIntent{
+					ActorID:     rt.candidate.entity.ID,
+					ActorName:   rt.candidate.entity.Name,
+					ActionType:  rt.reaction.Action.Type,
+					ActionText:  intentText,
+					Targets:     rt.targets,
+					Spontaneity: rt.spontaneity,
+					Luck:        rt.luck,
+					Attributes:  attrMap,
+				}
+			}
+			s.mu.RUnlock()
+
+			adj := SceneAdjudication{
+				SceneID:         sceneID,
+				Tick:            currentTick,
+				Timestamp:       currentTimestamp,
+				Intents:         intents,
+				WorldState:      worldState,
+				SceneEvents:     recentScene,
+				GlobalEvents:    recentGlobal,
+				TickDurationSec: tickDur,
+			}
+
+			var ruling *SceneRuling
+			var err error
+			if s.Arbiter != nil {
+				ruling, err = s.Arbiter.ResolveScene(ctx, adj)
+			} else {
+				var verdicts []IntentVerdict
+				for _, in := range intents {
+					verdicts = append(verdicts, IntentVerdict{
+						ActorID: in.ActorID,
+						Verdict: "as_intended",
+						Outcome: "success",
+					})
+				}
+				ruling = &SceneRuling{
+					SceneID:    sceneID,
+					Verdicts:   verdicts,
+					Resolution: "All actions proceeded as attempted.",
+				}
+			}
+
+			adjMu.Lock()
+			adjResults = append(adjResults, sceneAdjudicationResult{
+				sceneID: sceneID,
+				scene:   scene,
+				ruling:  ruling,
+				turns:   rTurns,
+				err:     err,
+			})
+			adjMu.Unlock()
+		}(scID, turnsInScene)
+	}
+
+	arbiterWG.Wait()
+
+	for _, ar := range adjResults {
+		if ar.err != nil {
+			return nil, fmt.Errorf("sim: scene %q arbiter failed: %w", ar.sceneID, ar.err)
 		}
+	}
 
-		// Launch background Thought Distiller concurrently!
-		if s.Distiller != nil && t.entity.Mind != nil {
-			_, isHuman := t.entity.Controller.(*HumanController)
-			distInput := DistillInput{
-				ActorID:       t.entity.ID,
-				ActorName:     t.entity.Name,
-				Personality:   t.entity.Mind.Profile.Personality,
+	// 8. APPLY EFFECTS (Oldest Scene First)
+	sort.Slice(adjResults, func(i, j int) bool {
+		ageI, ageJ := 0, 0
+		if adjResults[i].scene != nil {
+			ageI = adjResults[i].scene.CreatedTick
+		}
+		if adjResults[j].scene != nil {
+			ageJ = adjResults[j].scene.CreatedTick
+		}
+		return ageI < ageJ
+	})
+
+	s.mu.Lock()
+	tickMutated := make(map[EntityID]SceneID)
+	for _, ar := range adjResults {
+		if ar.scene != nil && ar.ruling != nil {
+			s.applySceneEffectsLocked(ar.scene, ar.ruling, tickMutated)
+			for _, v := range ar.ruling.Verdicts {
+				s.pendingIntent[v.ActorID] = v.RemainingIntent
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	// 9. PER-SCENE BROADCASTER (In Parallel)
+	broadcastOutputs := make(map[SceneID]map[EntityID]string)
+	var bcastWG sync.WaitGroup
+	var bcastMu sync.Mutex
+
+	for _, ar := range adjResults {
+		bcastWG.Add(1)
+		go func(res sceneAdjudicationResult) {
+			defer bcastWG.Done()
+
+			s.mu.RLock()
+			var actorsInfo []PerceiverInfo
+			sceneSpaceSet := make(map[EntityID]bool)
+			if res.scene != nil {
+				for _, spID := range res.scene.SpaceIDs {
+					sceneSpaceSet[spID] = true
+				}
+			}
+
+			for id, entity := range s.Entities {
+				if entity.Mind == nil {
+					continue
+				}
+				loc, ok := s.whereLocked(id)
+				if ok && loc != nil && sceneSpaceSet[loc.ID] {
+					actionTaken := ""
+					for _, rt := range res.turns {
+						if rt.candidate.entity.ID == id {
+							actionTaken = rt.reaction.Action.Action
+							break
+						}
+					}
+					actorsInfo = append(actorsInfo, PerceiverInfo{
+						ID:          id,
+						Name:        entity.Name,
+						SpaceName:   loc.Name,
+						ActionTaken: actionTaken,
+					})
+				}
+			}
+
+			var actionResults []ActorActionResult
+			for _, rt := range res.turns {
+				verdict := "as_intended"
+				if res.ruling != nil {
+					for _, v := range res.ruling.Verdicts {
+						if v.ActorID == rt.candidate.entity.ID {
+							verdict = v.Verdict
+							break
+						}
+					}
+				}
+				actionResults = append(actionResults, ActorActionResult{
+					ActorID:    rt.candidate.entity.ID,
+					ActorName:  rt.candidate.entity.Name,
+					ActionType: rt.reaction.Action.Type,
+					ActionText: rt.reaction.Action.Action,
+					Verdict:    verdict,
+				})
+			}
+			s.mu.RUnlock()
+
+			bInput := BroadcastInput{
+				SceneID:       res.sceneID,
 				Tick:          currentTick,
 				Timestamp:     currentTimestamp,
-				Stimulus:      stimulusText,
-				Cognition:     reaction.Cognition,
-				Intent:        reaction.Action.Description,
+				Resolution:    res.ruling.Resolution,
+				ActionResults: actionResults,
+				Actors:        actorsInfo,
+			}
+
+			bRes, err := s.Broadcaster.Broadcast(ctx, bInput)
+			if err != nil || len(bRes.Perceptions) == 0 {
+				bRes.Perceptions = make(map[EntityID]string)
+				for _, a := range actorsInfo {
+					bRes.Perceptions[a.ID] = res.ruling.Resolution
+				}
+			}
+
+			bcastMu.Lock()
+			broadcastOutputs[res.sceneID] = bRes.Perceptions
+			bcastMu.Unlock()
+		}(ar)
+	}
+
+	bcastWG.Wait()
+
+	// 10. DELIVER PERCEPTIONS & BUILD TICK REPORTS
+	var reports []TickReport
+
+	s.mu.Lock()
+	for _, ar := range adjResults {
+		sceneLoc := EntityID("")
+		if ar.scene != nil && len(ar.scene.SpaceIDs) > 0 {
+			sceneLoc = ar.scene.SpaceIDs[0]
+		}
+
+		ev := Event{
+			Tick:        currentTick,
+			Timestamp:   currentTimestamp,
+			LocationID:  sceneLoc,
+			SceneID:     ar.sceneID,
+			Kind:        EventWorld,
+			Description: ar.ruling.Resolution,
+		}
+		s.EventLog = append(s.EventLog, ev)
+
+		perceptions := broadcastOutputs[ar.sceneID]
+		for actorID, pText := range perceptions {
+			if strings.TrimSpace(pText) != "" {
+				s.inbox[actorID] = append(s.inbox[actorID], Event{
+					Tick:        currentTick,
+					Timestamp:   currentTimestamp,
+					LocationID:  sceneLoc,
+					SceneID:     ar.sceneID,
+					Kind:        EventOutcome,
+					Description: pText,
+				})
+			}
+		}
+
+		for _, rt := range ar.turns {
+			reports = append(reports, TickReport{
+				Tick:         currentTick,
+				Timestamp:    currentTimestamp,
+				SceneID:      ar.sceneID,
+				ActorID:      rt.candidate.entity.ID,
+				ActorName:    rt.candidate.entity.Name,
+				Stimulus:     rt.candidate.view.Text,
+				Reaction:     rt.reaction,
+				SceneRuling:  ar.ruling,
+				Thoughts:     rt.candidate.selected,
+				PriorDistill: rt.candidate.priorDist,
+			})
+		}
+	}
+	s.mu.Unlock()
+
+	// 11. LAUNCH BACKGROUND THOUGHT DISTILLERS CONCURRENTLY
+	if s.Distiller != nil {
+		for _, rt := range resolvedTurns {
+			if rt.candidate.entity.Mind == nil {
+				continue
+			}
+			_, isHuman := rt.candidate.entity.Controller.(*HumanController)
+			distInput := DistillInput{
+				ActorID:       rt.candidate.entity.ID,
+				ActorName:     rt.candidate.entity.Name,
+				Personality:   rt.candidate.entity.Mind.Profile.Personality,
+				Tick:          currentTick,
+				Timestamp:     currentTimestamp,
+				Stimulus:      rt.candidate.view.Text,
+				Cognition:     rt.reaction.Cognition,
+				Intent:        rt.reaction.Action.Action,
 				IsHuman:       isHuman,
-				Thoughts:      t.entity.Mind.ThoughtsSnapshot(),
-				Perceivable:   view.Perceivable,
-				KnownEntities: t.entity.Mind.KnownEntitiesCopy(),
+				Thoughts:      rt.candidate.entity.Mind.ThoughtsSnapshot(),
+				Perceivable:   rt.candidate.view.Perceivable,
+				KnownEntities: rt.candidate.entity.Mind.KnownEntitiesCopy(),
 			}
 
 			distChan := make(chan DistillResult, 1)
 			s.mu.Lock()
-			s.pendingDistill[t.entity.ID] = distChan
+			s.pendingDistill[rt.candidate.entity.ID] = distChan
 			s.mu.Unlock()
 
 			go func(mind *actor.Actor, in DistillInput, out chan<- DistillResult) {
@@ -462,153 +823,13 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 					res.Rejected = rejected
 				}
 				out <- res
-			}(t.entity.Mind, distInput, distChan)
-		}
-		reports = append(reports, report)
-
-		// 4. Record action, adjudicate via Arbiter if act, and route perceptions
-		switch reaction.Action.Type {
-		case actor.Speak:
-			s.mu.Lock()
-			ev := Event{
-				Tick:        currentTick,
-				Timestamp:   currentTimestamp,
-				LocationID:  t.spaceID,
-				SourceID:    t.entity.ID,
-				SourceName:  t.entity.Name,
-				Kind:        EventSpeak,
-				Description: reaction.Action.Description,
-			}
-			s.EventLog = append(s.EventLog, ev)
-			s.broadcastToSpaceLocked(t.spaceID, ev, t.entity.ID)
-			s.mu.Unlock()
-
-		case actor.Act:
-			if s.Arbiter != nil {
-				// Prepare adjudication context under read lock
-				s.mu.RLock()
-				vitalsCopy := make(map[string]string)
-				mood := ""
-				if t.entity.Mind != nil {
-					mood = t.entity.Mind.Status.Mood
-					for k, v := range t.entity.Mind.Status.Vitals {
-						vitalsCopy[k] = v
-					}
-				}
-				worldState := s.renderObjectiveLocked(t.spaceID)
-				recentEvents := s.recentEventsLocked(t.spaceID, 5)
-				luck := s.RNG.Float64()
-				tickDur := int(s.Clock.TickDuration.Seconds())
-				if tickDur <= 0 {
-					tickDur = 10
-				}
-
-				intent := reaction.Action.Description
-				if prev := s.pendingIntent[t.entity.ID]; prev != "" {
-					intent = fmt.Sprintf("%s (continuing previous intent: %s)", intent, prev)
-				}
-				s.mu.RUnlock()
-
-				adj := Adjudication{
-					Tick:            currentTick,
-					Timestamp:       currentTimestamp,
-					ActorID:         t.entity.ID,
-					ActorName:       t.entity.Name,
-					ActorVitals:     vitalsCopy,
-					ActorMood:       mood,
-					Intent:          intent,
-					WorldState:      worldState,
-					RecentEvents:    recentEvents,
-					Luck:            luck,
-					TickDurationSec: tickDur,
-				}
-
-				ruling, err := s.Arbiter.Resolve(ctx, adj)
-				if err != nil {
-					return reports, fmt.Errorf("sim: arbiter resolution failed on tick %d for actor %q: %w", currentTick, t.entity.Name, err)
-				}
-
-				report.Ruling = ruling
-
-				// Apply world mutations and route sensory feeds under write lock
-				s.mu.Lock()
-				s.applyEffectsLocked(t.entity.ID, ruling)
-				s.pendingIntent[t.entity.ID] = ruling.RemainingIntent
-
-				// Record objective act event in audit log and broadcast to onlookers
-				ev := Event{
-					Tick:        currentTick,
-					Timestamp:   currentTimestamp,
-					LocationID:  t.spaceID,
-					SourceID:    t.entity.ID,
-					SourceName:  t.entity.Name,
-					Kind:        EventAct,
-					Description: ruling.Resolution,
-					Observed:    ruling.ObserverPerception,
-					Outcome:     string(ruling.Outcome),
-					Intent:      reaction.Action.Description,
-				}
-				s.EventLog = append(s.EventLog, ev)
-				s.broadcastToSpaceLocked(t.spaceID, ev, t.entity.ID)
-
-				// Deliver personal sensory feedback and remaining intent directly to the acting actor
-				feedback := ruling.ActorPerception
-				if feedback == "" {
-					feedback = ruling.Resolution
-				}
-				if ruling.RemainingIntent != "" {
-					feedback += fmt.Sprintf("\n(Remaining plan not yet attempted: %s)", ruling.RemainingIntent)
-				}
-
-				outcomeEv := Event{
-					Tick:        currentTick,
-					Timestamp:   currentTimestamp,
-					LocationID:  t.spaceID,
-					SourceID:    t.entity.ID,
-					SourceName:  t.entity.Name,
-					Kind:        EventOutcome,
-					Description: fmt.Sprintf("[Outcome of your attempt: %s]\n%s", strings.ToUpper(string(ruling.Outcome)), feedback),
-					Outcome:     string(ruling.Outcome),
-					Intent:      reaction.Action.Description,
-				}
-				s.inbox[t.entity.ID] = append(s.inbox[t.entity.ID], outcomeEv)
-				s.mu.Unlock()
-
-				// Boost focus for any entities mentioned in the ruling resolution
-				s.ScanAndBoostMentions(t.entity.ID, ruling.Resolution)
-			} else {
-				s.mu.Lock()
-				ev := Event{
-					Tick:        currentTick,
-					Timestamp:   currentTimestamp,
-					LocationID:  t.spaceID,
-					SourceID:    t.entity.ID,
-					SourceName:  t.entity.Name,
-					Kind:        EventAct,
-					Description: reaction.Action.Description,
-				}
-				s.EventLog = append(s.EventLog, ev)
-				s.broadcastToSpaceLocked(t.spaceID, ev, t.entity.ID)
-				s.mu.Unlock()
-			}
-
-		case actor.Wait:
-			s.mu.Lock()
-			ev := Event{
-				Tick:        currentTick,
-				Timestamp:   currentTimestamp,
-				LocationID:  t.spaceID,
-				SourceID:    t.entity.ID,
-				SourceName:  t.entity.Name,
-				Kind:        EventWait,
-				Description: reaction.Action.Description,
-			}
-			s.EventLog = append(s.EventLog, ev)
-			s.mu.Unlock()
+			}(rt.candidate.entity.Mind, distInput, distChan)
 		}
 	}
 
-	// 5. Decay temporary focus boosts and advance clock
+	_ = scenes
+
+	// 12. ADVANCE CLOCK & DECAY FOCUS
 	s.DecayFocus(0.70)
 
 	s.mu.Lock()
