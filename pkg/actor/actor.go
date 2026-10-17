@@ -282,13 +282,12 @@ func (a *Actor) buildDeveloperMessages() []llm.Message {
 
 	profileContent := fmt.Sprintf(`ACTOR PROFILE:
 - Name: %s
-- Role: %s
 - Personality: %s%s
 - Background: %s
 
 COGNITION DIRECTIVE:
 When thinking, write exclusively as %s's raw, unformatted stream of consciousness. Never use numbered lists, bullet points, headers, or analytical steps.`,
-		a.Profile.Name, a.Profile.Role, a.Profile.Personality, directivesText, a.Profile.Background, a.Profile.Name)
+		a.Profile.Name, a.Profile.Personality, directivesText, a.Profile.Background, a.Profile.Name)
 
 	msgs = append(msgs, llm.Message{
 		Role:    llm.Developer,

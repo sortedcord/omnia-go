@@ -103,11 +103,11 @@ func NewSpaceEntity(id EntityID, name, description string, enterable bool) *Enti
 // visualDescription is what onlookers physically see (not internal psychological personality).
 func NewActorEntity(id EntityID, a *actor.Actor, visualDescription string) *Entity {
 	e := NewEntity(id, a.Profile.Name)
-	e.Aliases = []string{a.Profile.Name, a.Profile.Role}
+	e.Aliases = []string{a.Profile.Name}
 	if visualDescription != "" {
 		e.Description = visualDescription
-	} else if a.Profile.Role != "" {
-		e.Description = a.Profile.Role
+	} else {
+		e.Description = a.Profile.Name
 	}
 	e.Salience = 0.8 // actors have high baseline salience
 	e.Mind = a

@@ -21,7 +21,6 @@ type EntityRef struct {
 type DistillInput struct {
 	ActorID       EntityID
 	ActorName     string
-	ActorRole     string
 	Personality   string
 	Tick          int
 	Timestamp     string
@@ -80,7 +79,7 @@ func (d *LLMDistiller) Distill(ctx context.Context, in DistillInput) (DistillRes
 		Tick:    in.Tick,
 	}
 
-	systemPrompt := fmt.Sprintf(`You are the SUBCONSCIOUS THOUGHT DISTILLER for the character "%s" (%s).
+	systemPrompt := fmt.Sprintf(`You are the SUBCONSCIOUS THOUGHT DISTILLER for the character "%s".
 Your role is to maintain their private, subjective thought graph (beliefs, intentions, feelings, suspicions).
 
 OUTPUT REQUIREMENT:
@@ -115,7 +114,7 @@ DISTILLATION RULES:
    - Produce between 0 and 4 high-quality ops per cycle. Do not spam.
 4. Entity Linking:
    - You may ONLY link to entity IDs explicitly provided in PERCEIVABLE ENTITIES or KNOWN ENTITIES. Never invent IDs.`,
-		in.ActorName, in.ActorRole)
+		in.ActorName)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("CHARACTER: %s | PERSONALITY: %s\n", in.ActorName, in.Personality))

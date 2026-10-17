@@ -132,7 +132,6 @@ func main() {
 	zackProfile := actor.Profile{
 		ID:          "zack",
 		Name:        "Zack",
-		Role:        "College Student & Recruited Fake Boyfriend",
 		Personality: "Observant, grounded, slightly dry humor, loyal friend caught in an absurd social mess",
 		Directives: []string{
 			"Decide how to handle Mia's chaotic scheme and Nelly's housing emergency",
@@ -210,7 +209,6 @@ func main() {
 	nellyProfile := actor.Profile{
 		ID:          "nelly",
 		Name:        "Nelly",
-		Role:        "Overthinking Student in Housing Panic",
 		Personality: "Warm, considerate, severely flustered under relational pressure, overthinks social perception, detail-obsessed when stressed",
 		Directives: []string{
 			"Try desperately to act natural and explain the fake relationship setup without dying of embarrassment",
@@ -262,7 +260,6 @@ func main() {
 	miaProfile := actor.Profile{
 		ID:          "mia",
 		Name:        "Mia",
-		Role:        "The Confident Matchmaker / Scheme Architect",
 		Personality: "Socially bulletproof, cheerful, pragmatically shameless, smooth, easily amused, loves placing people together to solve problems",
 		Directives: []string{
 			"Keep Zack and Nelly moving forward so the housing inspection doesn't blow up",
@@ -302,7 +299,7 @@ func main() {
 	fmt.Println("   SCENARIO: ACCIDENTAL ARRANGEMENT (SLICE OF LIFE) ")
 	fmt.Println("==================================================")
 	fmt.Printf("Setting:   %s\n", livingRoom.Name)
-	fmt.Printf("Player:    %s (%s)\n", zackProfile.Name, zackProfile.Role)
+	fmt.Printf("Player:    %s\n", zackProfile.Name)
 	fmt.Printf("Co-Stars:  %s, %s\n", nellyProfile.Name, miaProfile.Name)
 	fmt.Printf("Clock:     %s\n", world.Clock)
 

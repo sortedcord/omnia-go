@@ -437,7 +437,6 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			distInput := DistillInput{
 				ActorID:       t.entity.ID,
 				ActorName:     t.entity.Name,
-				ActorRole:     t.entity.Mind.Profile.Role,
 				Personality:   t.entity.Mind.Profile.Personality,
 				Tick:          currentTick,
 				Timestamp:     currentTimestamp,

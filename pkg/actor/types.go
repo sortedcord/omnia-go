@@ -63,7 +63,6 @@ type Action struct {
 type Profile struct {
 	ID          string
 	Name        string
-	Role        string
 	Personality string
 	Directives  []string
 	Background  string
