@@ -258,6 +258,15 @@ func (s *Simulation) QueueEvent(locationID EntityID, description string) {
 	s.scheduledEvents[s.Clock.TickCount] = append(s.scheduledEvents[s.Clock.TickCount], ev)
 }
 
+// GetEventLog returns a thread-safe copy of the simulation's event log.
+func (s *Simulation) GetEventLog() []Event {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make([]Event, len(s.EventLog))
+	copy(res, s.EventLog)
+	return res
+}
+
 // DeliverDirectEvent routes a sensory event directly into an actor's personal inbox.
 func (s *Simulation) DeliverDirectEvent(targetID EntityID, description string) {
 	s.mu.Lock()
