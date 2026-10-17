@@ -46,18 +46,31 @@ Every actor action includes an explicit `targets` field:
 * **No Perception Gating**: Targets do not restrict who perceives the action. Anyone co-present in the scene overhears or witnesses the action.
 * **Name Resolution**: The simulation matches target names to perceivable entity IDs. Unknown names are discarded.
 
-### B. Mutable Attributes (Replacing `Status`)
-Character physiology and state are managed through structured `Attributes`:
+### B. Mutable Attributes on Entities with ACL & Visibility
+Every entity in the simulation (characters, props, vehicles, viewports, doors) owns an `Attributes` map with granular Access Control Lists (ACL):
+
 ```go
+type Visibility string
+
+const (
+    VisibilityPublic  Visibility = "public"
+    VisibilityPrivate Visibility = "private"
+)
+
 type Attribute struct {
-    Value   string
-    Allowed []string // Non-empty indicates an enum (e.g. ["low", "normal", "high"])
-    Core    bool     // Core attributes can be mutated, but cannot be removed
+    Value      string     `json:"value"`
+    Allowed    []string   `json:"allowed,omitempty"`   // Non-empty = enum
+    Core       bool       `json:"core,omitempty"`      // Cannot be removed
+    Visibility Visibility `json:"visibility"`          // "public" or "private"
+    Accessors  []EntityID `json:"accessors,omitempty"` // Whitelist of entity IDs who can observe this when private
 }
 ```
-* **Core Attributes**: `mood` (free text) and `arousal` (enum: `low`, `normal`, `high`).
-* **Scenario Attributes**: Configurable per simulation (e.g. `Social Battery`, `Oxygen Reserve`).
-* **Mutations**: Arbiter commands `set_attribute` (validated against `Allowed`) and `remove_attribute` (rejected for core attributes).
+
+* **The Core Attribute ACL Principle**:
+  * **`public`**: The attribute is openly observable by anyone in the room (e.g. visibly trembling, a shattered window, room lights flickering). Shapes everyone's thinking. (`accessors` is automatically cleared out).
+  * **`private` with Entity in Accessors** (e.g. `accessors: ["zack"]`): Set when you want an internal conscious state (e.g. racing heart, private sarcasm, conscious panic) to **directly affect that entity's thinking** and future choices.
+  * **`private` with NO Accessors** (empty `accessors: []`): Set when you do **NOT** want the entity to inherently know about it, but that attribute **does affect the actual actions that are ultimately decided or done by the Arbiter**! (e.g. latent muscle fatigue, an unseen micro-fracture, subconscious panic impairing motor precision). The entity remains oblivious in their conscious thoughts, but the Arbiter uses this hidden attribute to realistically alter, restrict, or modify actions instead of intents directly translating into reality!
+* **Mutations**: The Arbiter commands `set_attribute` (can mutate value, toggle public/private, and modify the accessor list) and `remove_attribute` (rejected for core attributes). When changing an attribute to public, the accessors list is cleared. When private, the Arbiter can mutate the accessors list directly.
 
 ### C. Dynamic Scene Partitioning
 A **Scene** is a group of actors who can mutually perceive each other well enough to interact in real time:

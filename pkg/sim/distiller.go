@@ -101,6 +101,7 @@ DISTILLATION RULES:
 1. Strict In-World Subjectivity:
    - Discard all meta-reasoning: Never create thoughts about prompts, JSON schemas, formatting, token limits, or rules.
    - Filter raw stream-of-consciousness down into genuine in-character convictions, physical sensations, tactical plans, or suspicions.
+   - The character's accessible private attributes reflect their conscious internal sensations and emotions (e.g. elevated heart rate, private nervousness) that naturally feed into their feelings and beliefs.
    - The character DOES NOT know if their action succeeded yet (the physics referee hasn't resolved it). Only distill what they felt, believed, and attempted.
 2. Thought Categories:
    - "intention": A personal goal or plan (e.g. "I must reach the breaker box to save the canopy").

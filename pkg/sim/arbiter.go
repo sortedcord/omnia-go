@@ -168,11 +168,15 @@ REFEREE RULES:
    - "move": Reparents entity.
    - "set_condition": Updates room condition (empty value deletes).
    - "set_portal": Sets closed/locked on portals.
-   - "set_attribute": Updates an attribute on ANY entity (actor, prop, vehicle, door). Set "visibility": "public" (clears accessors) or "private" with specific "accessors". An attribute with "private" and empty "accessors": [] is completely hidden from everyone (even the entity itself!), known only to you (the Arbiter) to realistically influence outcomes and alter actions!
+   - "set_attribute": Updates an attribute on ANY entity (actor, prop, vehicle, door). Set "visibility": "public" or "private" with specific "accessors".
    - "remove_attribute": Removes a non-core attribute. Core attributes (mood, arousal) cannot be removed.
    - "set_open": Sets open=true/false on a container.
    - "reveal": Sets concealed=false.
-   - NEVER invent new entity IDs. Only use IDs from the WORLD STATE.`,
+   - NEVER invent new entity IDs. Only use IDs from the WORLD STATE.
+6. The Attribute ACL & Visibility Principle:
+   - "public": Openly observable by anyone in the room (e.g. visibly trembling, a shattered window, flickering lights). Affects everyone's perception and thinking. (Accessors are cleared automatically).
+   - "private" WITH the entity in "accessors" (e.g. ["<entity_id>"]): Use this when you want an internal conscious state (e.g. racing heart, private sarcasm, conscious panic) to DIRECTLY AFFECT THAT ENTITY'S THINKING and future dialogue/choices.
+   - "private" with NO accessors (empty []): Use this when you do NOT want the entity to inherently know about the attribute, but that attribute DOES AFFECT THE ACTUAL ACTIONS that you (the Arbiter) ultimately decide or resolve! (e.g. latent muscle cramp, subconscious panic impairing motor precision, an unseen structural defect). The entity remains oblivious in their conscious thoughts, but you use this hidden attribute to realistically alter, fumble, or restrict their physical attempts!`,
 		adj.TickDurationSec)
 
 	var sb strings.Builder
