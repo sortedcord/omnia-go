@@ -69,6 +69,22 @@ func NewLLMBroadcaster(client llm.Client, model string) *LLMBroadcaster {
 	}
 }
 
+// BroadcasterSchema returns the strict JSON schema for scene perception broadcasting.
+// It constructs an object with a required property for each actor present in the scene.
+func BroadcasterSchema(actorIDs []EntityID) *llm.Schema {
+	var props []llm.Property
+	for _, id := range actorIDs {
+		props = append(props, llm.Prop(string(id), llm.Str(fmt.Sprintf("Second-person sensory perception for actor %q (what they saw, heard, and felt).", id))))
+	}
+	if len(props) == 0 {
+		props = append(props, llm.Prop("dummy", llm.Str("Empty scene placeholder.")))
+	}
+
+	return llm.Obj("Individualized subjective sensory perceptions for actors present in the scene.",
+		llm.Prop("perceptions", llm.Obj("Map of actor IDs to their second-person sensory perception.", props...)),
+	)
+}
+
 type broadcastWireResponse struct {
 	Perceptions map[string]string `json:"perceptions"`
 }
@@ -88,15 +104,6 @@ func (b *LLMBroadcaster) Broadcast(ctx context.Context, in BroadcastInput) (Broa
 
 	systemPrompt := `You are the SCENE PERCEPTION BROADCASTER.
 Your role is to translate the Arbiter's objective ground truth into individualized, subjective sensory perceptions for each actor present in the scene.
-
-OUTPUT REQUIREMENT:
-You MUST respond ONLY with a valid JSON object matching this schema:
-{
-  "perceptions": {
-    "<exact_actor_id_1>": "<second-person sensory description of what this actor experienced, saw, heard, and felt>",
-    "<exact_actor_id_2>": "<second-person sensory description tailored to this actor's perspective>"
-  }
-}
 
 BROADCASTING RULES:
 1. Pure Second-Person Subjectivity:
@@ -132,13 +139,18 @@ BROADCASTING RULES:
 	}
 	sb.WriteString("\nSynthesize per-actor perceptions:")
 
+	var actorIDs []EntityID
+	for _, a := range in.Actors {
+		actorIDs = append(actorIDs, a.ID)
+	}
+
 	req := llm.ChatRequest{
 		Model: b.model,
 		Messages: []llm.Message{
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: sb.String()},
 		},
-		ResponseFormat:   llm.JSONObject(),
+		ResponseFormat:   llm.StrictSchema("scene_perceptions", "Individualized subjective sensory perceptions per actor.", BroadcasterSchema(actorIDs)),
 		ReasoningEffort:  llm.ReasoningLow,
 		IncludeReasoning: true,
 	}

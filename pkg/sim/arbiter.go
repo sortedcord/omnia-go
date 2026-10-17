@@ -107,43 +107,97 @@ func NewLLMArbiter(client llm.Client, model string) *LLMArbiter {
 	}
 }
 
+// ArbiterSchema constructs the strict JSON schema for scene adjudication rulings.
+func ArbiterSchema(actorIDs []EntityID, entityIDs []string) *llm.Schema {
+	var actorIDStrings []string
+	for _, id := range actorIDs {
+		actorIDStrings = append(actorIDStrings, string(id))
+	}
+
+	actorIDSchema := llm.Str("Actor ID")
+	if len(actorIDStrings) > 0 {
+		actorIDSchema = llm.Enum("Actor ID", actorIDStrings...)
+	}
+
+	entityIDSchema := llm.Str("Entity ID from world state")
+	if len(entityIDs) > 0 {
+		entityIDSchema = llm.Enum("Entity ID from world state", entityIDs...)
+	}
+
+	var verdictProps []llm.Property
+	for _, id := range actorIDs {
+		verdictProps = append(verdictProps, llm.Prop(string(id), llm.Obj(fmt.Sprintf("Adjudication verdict for %s.", id),
+			llm.Prop("verdict", llm.Enum("Action verdict: as_intended (no major disruption), altered (adapted, deflected, partially interrupted), preempted (situation changed before action started).",
+				"as_intended", "altered", "preempted")),
+			llm.Prop("outcome", llm.Enum("Outcome calibration: success (succeeded as planned), partial (bounded progress), failure (failed cleanly), mishap (blunder or slip), interrupted (cut short mid-stride).",
+				"success", "partial", "failure", "mishap", "interrupted")),
+			llm.Prop("remaining_intent", llm.Nullable(llm.Str("Any uncompleted portion of intent if interrupted or altered; null if fully executed."))),
+		)))
+	}
+	if len(verdictProps) == 0 {
+		verdictProps = append(verdictProps, llm.Prop("dummy", llm.Str("Empty scene placeholder.")))
+	}
+
+	effectItem := llm.Obj("An atomic mutation to apply to the simulation world state.",
+		llm.Prop("type", llm.Enum("Mutation type: move, set_attribute, remove_attribute, set_portal, set_open, reveal.",
+			"move", "set_attribute", "remove_attribute", "set_portal", "set_open", "reveal")),
+		llm.Prop("entity_id", entityIDSchema),
+		llm.Prop("parent_id", llm.Nullable(entityIDSchema)),
+		llm.Prop("relation", llm.Nullable(llm.Enum("Spatial relation for move: in, on, under, behind, worn, held, seated; null for other mutations.",
+			"in", "on", "under", "behind", "worn", "held", "seated"))),
+		llm.Prop("placement", llm.Nullable(llm.Str("Optional free-text placement qualifier (e.g. 'on coffee table'); null if none."))),
+		llm.Prop("key", llm.Nullable(llm.Str("Attribute name for set_attribute or remove_attribute; null for other mutations."))),
+		llm.Prop("value", llm.Nullable(llm.Str("New attribute value for set_attribute; null for other mutations."))),
+		llm.Prop("visibility", llm.Nullable(llm.Enum("Attribute visibility: public (visible to all in room) or private (visible only to accessors); null for other mutations.",
+			"public", "private"))),
+		llm.Prop("accessors", llm.Nullable(llm.Arr("Actor IDs permitted to observe this private attribute; empty array if private to Arbiter only; null for other mutations.", actorIDSchema))),
+		llm.Prop("closed", llm.Nullable(llm.Bool("Closed state for set_portal; null for other mutations."))),
+		llm.Prop("locked", llm.Nullable(llm.Bool("Locked state for set_portal; null for other mutations."))),
+		llm.Prop("open", llm.Nullable(llm.Bool("Open state for set_open; null for other mutations."))),
+	)
+
+	return llm.Obj("Authoritative scene adjudication ruling.",
+		llm.Prop("execution_order", llm.Arr("Sequential order of actor actions based on spontaneity, reflexes, and physical position.", actorIDSchema)),
+		llm.Prop("verdicts", llm.Obj("Verdicts keyed by actor ID.", verdictProps...)),
+		llm.Prop("resolution", llm.Str("Concise objective third-person canonical ground truth of everything that physically happened in the scene. Written in past tense without second-person bias.")),
+		llm.Prop("effects", llm.Arr("Atomic mutations applied to the world state.", effectItem)),
+	)
+}
+
+type arbiterWireVerdict struct {
+	Verdict         string  `json:"verdict"`
+	Outcome         string  `json:"outcome"`
+	RemainingIntent *string `json:"remaining_intent"`
+}
+
+type arbiterWireEffect struct {
+	Type       string   `json:"type"`
+	EntityID   string   `json:"entity_id"`
+	ParentID   *string  `json:"parent_id"`
+	Relation   *string  `json:"relation"`
+	Placement  *string  `json:"placement"`
+	Key        *string  `json:"key"`
+	Value      *string  `json:"value"`
+	Visibility *string  `json:"visibility"`
+	Accessors  []string `json:"accessors"`
+	Closed     *bool    `json:"closed"`
+	Locked     *bool    `json:"locked"`
+	Open       *bool    `json:"open"`
+}
+
+type arbiterWireResponse struct {
+	ExecutionOrder []string                      `json:"execution_order"`
+	Verdicts       map[string]arbiterWireVerdict `json:"verdicts"`
+	Resolution     string                        `json:"resolution"`
+	Effects        []arbiterWireEffect           `json:"effects"`
+}
+
 // ResolveScene refereees all concurrent actor intents in a scene and returns the authoritative ruling.
 func (a *LLMArbiter) ResolveScene(ctx context.Context, adj SceneAdjudication) (*SceneRuling, error) {
 	start := time.Now()
 
 	systemPrompt := fmt.Sprintf(`You are THE ARBITER: an impartial, physically realistic simulation referee and physics engine.
-Actors in this scene submitted their actions SIMULTANEOUSLY. You determine what ACTUALLY HAPPENS.
-
-OUTPUT REQUIREMENT:
-You MUST respond ONLY with a valid JSON object matching this schema:
-{
-  "execution_order": ["<actor_id_1>", "<actor_id_2>"],
-  "verdicts": [
-    {
-      "actor_id": "<exact_actor_id>",
-      "verdict": "as_intended" | "altered" | "preempted",
-      "outcome": "success" | "partial" | "failure" | "mishap" | "interrupted",
-      "remaining_intent": "<any uncompleted portion of the intent, or empty string>"
-    }
-  ],
-  "resolution": "<concise objective third-person ground truth of everything that physically happened in the scene>",
-  "effects": [
-    {
-      "type": "move" | "set_condition" | "set_portal" | "set_attribute" | "remove_attribute" | "set_open" | "reveal",
-      "entity_id": "<exact entity ID from world state>",
-      "parent_id": "<exact target parent entity ID for move>",
-      "relation": "in" | "on" | "under" | "behind" | "worn" | "held" | "seated",
-      "placement": "<optional placement description>",
-      "key": "<condition or attribute name>",
-      "value": "<new value>",
-      "visibility": "public" | "private",
-      "accessors": ["<entity_id_1>"],
-      "closed": true | false,
-      "locked": true | false,
-      "open": true | false
-    }
-  ]
-}
+Actors in this scene submitted their actions SIMULTANEOUSLY. You determine what ACTUALLY HAPPENS according to the structured schema.
 
 REFEREE RULES:
 1. Simultaneity & Precedence:
@@ -151,29 +205,12 @@ REFEREE RULES:
    - Use Spontaneity scores and Luck rolls as guidance for who acts first or wins contests.
    - If two actors collide (e.g. both reaching for the same item), the higher spontaneity/reflexes and physical position wins; the second actor's action is "altered" or "preempted".
    - If an actor was interrupted before completing their action, mark verdict as "altered" or "preempted" with outcome "interrupted", and store unfinished action in "remaining_intent".
-2. Verdicts:
-   - "as_intended": Action proceeded without major disruption.
-   - "altered": Action was forced to adapt, deflected, or partially interrupted by another actor's action or environment.
-   - "preempted": The situation changed so fast the action never got off the ground.
-3. Outcome Calibration:
-   - "success": Attempt succeeded as planned.
-   - "partial": Progress made, but bounded by time or partial interference.
-   - "failure": Failed cleanly without disaster.
-   - "mishap": Physical blunder, slip, or fumble (especially with low Luck <= 0.20 or stressful conditions).
-   - "interrupted": Cut short mid-stride.
-4. Objective Resolution Only:
+2. Outcome Calibration:
+   - "mishap" (physical blunder or fumble) is especially likely when Luck <= 0.20 or under stressful conditions.
+3. Objective Resolution Only:
    - Describe purely the objective physical ground truth of the scene in past tense.
    - Do NOT write subjective second-person text (the Broadcaster handles subjective perceptions).
-5. Effects Whitelist:
-   - "move": Reparents entity.
-   - "set_condition": Updates room condition (empty value deletes).
-   - "set_portal": Sets closed/locked on portals.
-   - "set_attribute": Updates an attribute on ANY entity (actor, prop, vehicle, door). Set "visibility": "public" or "private" with specific "accessors".
-   - "remove_attribute": Removes a non-core attribute. Core attributes (mood, arousal) cannot be removed.
-   - "set_open": Sets open=true/false on a container.
-   - "reveal": Sets concealed=false.
-   - NEVER invent new entity IDs. Only use IDs from the WORLD STATE.
-6. The Attribute ACL & Visibility Principle:
+4. The Attribute ACL & Visibility Principle:
    - "public": Openly observable by anyone in the room (e.g. visibly trembling, a shattered window, flickering lights). Affects everyone's perception and thinking. (Accessors are cleared automatically).
    - "private" WITH the entity in "accessors" (e.g. ["<entity_id>"]): Use this when you want an internal conscious state (e.g. racing heart, private sarcasm, conscious panic) to DIRECTLY AFFECT THAT ENTITY'S THINKING and future dialogue/choices.
    - "private" with NO accessors (empty []): Use this when you do NOT want the entity to inherently know about the attribute, but that attribute DOES AFFECT THE ACTUAL ACTIONS that you (the Arbiter) ultimately decide or resolve! (e.g. latent muscle cramp, subconscious panic impairing motor precision, an unseen structural defect). The entity remains oblivious in their conscious thoughts, but you use this hidden attribute to realistically alter, fumble, or restrict their physical attempts!`,
@@ -226,13 +263,19 @@ REFEREE RULES:
 
 	sb.WriteString("\nAdjudicate the scene:")
 
+	var actorIDs []EntityID
+	for _, in := range adj.Intents {
+		actorIDs = append(actorIDs, in.ActorID)
+	}
+	entityIDs := extractEntityIDs(adj.WorldState, adj.Intents)
+
 	req := llm.ChatRequest{
 		Model: a.model,
 		Messages: []llm.Message{
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: sb.String()},
 		},
-		ResponseFormat:   llm.JSONObject(),
+		ResponseFormat:   llm.StrictSchema("scene_ruling", "Authoritative scene adjudication ruling.", ArbiterSchema(actorIDs, entityIDs)),
 		ReasoningEffort:  llm.ReasoningMedium,
 		IncludeReasoning: true,
 	}
@@ -242,16 +285,125 @@ REFEREE RULES:
 		return nil, fmt.Errorf("arbiter: chat completion failed for scene %q: %w", adj.SceneID, err)
 	}
 
-	var ruling SceneRuling
-	if err := llm.DecodeJSON(resp.Content, resp.ReasoningContent, &ruling); err != nil {
+	var wire arbiterWireResponse
+	if err := llm.DecodeJSON(resp.Content, resp.ReasoningContent, &wire); err != nil {
 		return nil, fmt.Errorf("arbiter: failed to decode scene ruling JSON: %w (content: %q)", err, resp.Content)
 	}
 
+	var ruling SceneRuling
 	ruling.SceneID = adj.SceneID
 	ruling.Duration = time.Since(start)
 	ruling.Usage = resp.Usage
+	ruling.Resolution = wire.Resolution
+
+	for _, idStr := range wire.ExecutionOrder {
+		ruling.ExecutionOrder = append(ruling.ExecutionOrder, EntityID(idStr))
+	}
+
+	verdictMap := wire.Verdicts
+	emitted := make(map[string]bool)
+
+	addVerdict := func(actorIDStr string) {
+		if emitted[actorIDStr] {
+			return
+		}
+		v, ok := verdictMap[actorIDStr]
+		if !ok {
+			return
+		}
+		emitted[actorIDStr] = true
+		remaining := ""
+		if v.RemainingIntent != nil {
+			remaining = *v.RemainingIntent
+		}
+		ruling.Verdicts = append(ruling.Verdicts, IntentVerdict{
+			ActorID:         EntityID(actorIDStr),
+			Verdict:         v.Verdict,
+			Outcome:         v.Outcome,
+			RemainingIntent: remaining,
+		})
+	}
+
+	for _, actorID := range ruling.ExecutionOrder {
+		addVerdict(string(actorID))
+	}
+	for _, in := range adj.Intents {
+		addVerdict(string(in.ActorID))
+	}
+
+	for _, we := range wire.Effects {
+		effType := EffectType(we.Type)
+		if we.Type == "set_condition" {
+			effType = EffectSetAttribute
+		}
+		eff := Effect{
+			Type:     effType,
+			EntityID: EntityID(we.EntityID),
+			Closed:   we.Closed,
+			Locked:   we.Locked,
+			Open:     we.Open,
+		}
+		if we.ParentID != nil {
+			eff.ParentID = EntityID(*we.ParentID)
+		}
+		if we.Relation != nil {
+			eff.Relation = Relation(*we.Relation)
+		}
+		if we.Placement != nil {
+			eff.Placement = *we.Placement
+		}
+		if we.Key != nil {
+			eff.Key = *we.Key
+		}
+		if we.Value != nil {
+			eff.Value = *we.Value
+		}
+		if we.Visibility != nil {
+			eff.Visibility = Visibility(*we.Visibility)
+		}
+		for _, acc := range we.Accessors {
+			eff.Accessors = append(eff.Accessors, EntityID(acc))
+		}
+		ruling.Effects = append(ruling.Effects, eff)
+	}
 
 	return &ruling, nil
+}
+
+func extractEntityIDs(worldState string, intents []ActorIntent) []string {
+	seen := make(map[string]bool)
+	var ids []string
+
+	addID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+
+	for _, in := range intents {
+		addID(string(in.ActorID))
+		for _, t := range in.Targets {
+			addID(string(t))
+		}
+	}
+
+	lines := strings.Split(worldState, "\n")
+	for _, line := range lines {
+		idx := strings.Index(line, "[ID: ")
+		if idx != -1 {
+			end := strings.Index(line[idx+5:], "]")
+			if end != -1 {
+				addID(line[idx+5 : idx+5+end])
+			}
+		}
+	}
+
+	if len(ids) > 250 {
+		return nil
+	}
+	return ids
 }
 
 // orderEffects applies effects in the arbiter's execution order. Effects are attributed
