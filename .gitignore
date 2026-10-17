@@ -1,0 +1,18 @@
+# Binaries and build artifacts
+bin/
+*.exe
+*.test
+*.out
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+auth.json
+mcp-auth.json
+*.key
+
+# Editor and OS
+.DS_Store
+.idea/
+.vscode/
