@@ -126,14 +126,23 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 				continue
 			}
 
-			if spaceEntity.Space.Conditions == nil {
-				spaceEntity.Space.Conditions = make(map[string]string)
+			if spaceEntity.Attributes == nil {
+				spaceEntity.Attributes = make(Attributes)
 			}
 
-			if eff.Value == "" {
-				delete(spaceEntity.Space.Conditions, eff.Key)
+			var err error
+			if eff.Visibility != "" || eff.Accessors != nil {
+				err = spaceEntity.Attributes.SetWithVisibility(eff.Key, eff.Value, eff.Visibility, eff.Accessors)
 			} else {
-				spaceEntity.Space.Conditions[eff.Key] = eff.Value
+				if eff.Value == "" {
+					err = spaceEntity.Attributes.Remove(eff.Key)
+				} else {
+					err = spaceEntity.Attributes.Set(eff.Key, eff.Value)
+				}
+			}
+			if err != nil {
+				ruling.RejectedEffects = append(ruling.RejectedEffects, fmt.Sprintf("set_condition: %v", err))
+				continue
 			}
 			spaceEntity.Revision++
 			ruling.AppliedEffects = append(ruling.AppliedEffects, eff)
@@ -340,15 +349,20 @@ func (s *Simulation) renderObjectiveSpacesLocked(spaceIDs []EntityID) string {
 		if space.Description != "" {
 			sb.WriteString(fmt.Sprintf("Description: %s\n", space.Description))
 		}
-		if space.Space != nil && len(space.Space.Conditions) > 0 {
-			sb.WriteString("Conditions:\n")
+		if len(space.Attributes) > 0 {
+			sb.WriteString("Environmental Attributes (ACL):\n")
 			var keys []string
-			for k := range space.Space.Conditions {
+			for k := range space.Attributes {
 				keys = append(keys, k)
 			}
 			sort.Strings(keys)
 			for _, k := range keys {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", k, space.Space.Conditions[k]))
+				attr := space.Attributes[k]
+				visDesc := string(attr.Visibility)
+				if attr.Visibility == VisibilityPrivate {
+					visDesc = fmt.Sprintf("private: %v", attr.Accessors)
+				}
+				sb.WriteString(fmt.Sprintf("- %s: %s (%s)\n", k, attr.Value, visDesc))
 			}
 		}
 

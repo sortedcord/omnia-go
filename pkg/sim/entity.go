@@ -29,12 +29,12 @@ type Link struct {
 // Space gives an entity an interior that can hold other entities.
 // If Enterable is true, actors can enter and reside inside this space (e.g. rooms, vehicle cabins).
 // If Enterable is false, it acts as a pocket, drawer, or container box.
+// Environmental conditions (lighting, atmosphere, tension) are managed as entity Attributes with ACL.
 type Space struct {
-	Enterable   bool              `json:"enterable"`
-	Open        bool              `json:"open"`
-	Transparent bool              `json:"transparent"`
-	Soundproof  bool              `json:"soundproof"`
-	Conditions  map[string]string `json:"conditions,omitempty"` // e.g. "Lighting": "Pitch Black", "Atmosphere": "Nominal"
+	Enterable   bool `json:"enterable"`
+	Open        bool `json:"open"`
+	Transparent bool `json:"transparent"`
+	Soundproof  bool `json:"soundproof"`
 }
 
 // Portal connects two spaces through an opening or barrier (e.g. a door, hatch, window, or corridor).
@@ -97,7 +97,6 @@ func NewSpaceEntity(id EntityID, name, description string, enterable bool) *Enti
 		Open:        true,
 		Transparent: false, // Opaque by default; set to true for glass viewports, vehicle windows, etc.
 		Soundproof:  false,
-		Conditions:  make(map[string]string),
 	}
 	return e
 }

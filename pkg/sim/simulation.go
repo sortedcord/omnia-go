@@ -196,10 +196,31 @@ func (s *Simulation) SetCondition(spaceID EntityID, key, value string) error {
 	if !ok || e.Space == nil {
 		return fmt.Errorf("sim: space %q not found", spaceID)
 	}
-	if e.Space.Conditions == nil {
-		e.Space.Conditions = make(map[string]string)
+	if e.Attributes == nil {
+		e.Attributes = make(Attributes)
 	}
-	e.Space.Conditions[key] = value
+	if err := e.Attributes.Set(key, value); err != nil {
+		return err
+	}
+	e.Revision++
+	return nil
+}
+
+// SetConditionWithVisibility sets an environmental attribute on a space entity with ACL visibility.
+func (s *Simulation) SetConditionWithVisibility(spaceID EntityID, key, value string, vis Visibility, accessors []EntityID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	e, ok := s.Entities[spaceID]
+	if !ok || e.Space == nil {
+		return fmt.Errorf("sim: space %q not found", spaceID)
+	}
+	if e.Attributes == nil {
+		e.Attributes = make(Attributes)
+	}
+	if err := e.Attributes.SetWithVisibility(key, value, vis, accessors); err != nil {
+		return err
+	}
 	e.Revision++
 	return nil
 }

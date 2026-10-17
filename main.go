@@ -71,8 +71,8 @@ func main() {
 		"A warm, slightly cluttered college apartment living room. Everything has been hastily staged to look like a loving couple lives here.",
 		true,
 	)
-	livingRoom.Space.Conditions["Atmosphere"] = "Warm, faintly smelling of lavender, coffee, and printed paper"
-	livingRoom.Space.Conditions["Social Tension"] = "Thick, awkward relational panic"
+	_ = livingRoom.Attributes.Set("Atmosphere", "Warm, faintly smelling of lavender, coffee, and printed paper")
+	_ = livingRoom.Attributes.Set("Social Tension", "Thick, awkward relational panic")
 
 	kitchen := world.SpawnSpace(
 		"kitchenette",

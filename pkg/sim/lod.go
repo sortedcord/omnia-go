@@ -179,16 +179,17 @@ func (s *Simulation) renderPerceptionView(ctx context.Context, perceiverID Entit
 	if space.Description != "" {
 		sb.WriteString(fmt.Sprintf("%s\n", space.Description))
 	}
-	if space.Space != nil && len(space.Space.Conditions) > 0 {
+	accessibleConditions := space.Attributes.AccessibleTo(perceiverID)
+	if len(accessibleConditions) > 0 {
 		sb.WriteString("Environmental Conditions:\n")
 		// Deterministic sorted condition keys
-		condKeys := make([]string, 0, len(space.Space.Conditions))
-		for k := range space.Space.Conditions {
+		condKeys := make([]string, 0, len(accessibleConditions))
+		for k := range accessibleConditions {
 			condKeys = append(condKeys, k)
 		}
 		sort.Strings(condKeys)
 		for _, k := range condKeys {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", k, space.Space.Conditions[k]))
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", k, accessibleConditions[k]))
 		}
 	}
 

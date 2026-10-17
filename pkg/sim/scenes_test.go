@@ -364,3 +364,39 @@ func TestAttributeMutationOnProps(t *testing.T) {
 		t.Fatalf("chair wobbly attribute failed: %s, %v", val, ok)
 	}
 }
+
+func TestSpaceEnvironmentalAttributesACL(t *testing.T) {
+	w := offlineWorld()
+	room := w.SpawnSpace("room", "Room", "A test room", true)
+
+	// Public condition: seen by everyone
+	_ = room.Attributes.SetWithVisibility("Lighting", "Dim", VisibilityPublic, nil)
+
+	// Private condition: only Zack perceives it
+	_ = room.Attributes.SetWithVisibility("SecretDraft", "Hissing behind curtain", VisibilityPrivate, []EntityID{"zack"})
+
+	// Private condition with empty accessors: completely invisible to all actors, known only to Arbiter
+	_ = room.Attributes.SetWithVisibility("CarbonMonoxide", "Dangerous", VisibilityPrivate, nil)
+
+	zackPerceived := room.Attributes.AccessibleTo("zack")
+	if zackPerceived["Lighting"] != "Dim" {
+		t.Fatal("zack should perceive public Lighting")
+	}
+	if zackPerceived["SecretDraft"] != "Hissing behind curtain" {
+		t.Fatal("zack should perceive SecretDraft")
+	}
+	if _, seen := zackPerceived["CarbonMonoxide"]; seen {
+		t.Fatal("zack must NOT perceive CarbonMonoxide (empty accessors)")
+	}
+
+	nellyPerceived := room.Attributes.AccessibleTo("nelly")
+	if nellyPerceived["Lighting"] != "Dim" {
+		t.Fatal("nelly should perceive public Lighting")
+	}
+	if _, seen := nellyPerceived["SecretDraft"]; seen {
+		t.Fatal("nelly must NOT perceive SecretDraft")
+	}
+	if _, seen := nellyPerceived["CarbonMonoxide"]; seen {
+		t.Fatal("nelly must NOT perceive CarbonMonoxide")
+	}
+}
