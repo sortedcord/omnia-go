@@ -3,6 +3,7 @@ package sim
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -243,4 +244,30 @@ REFEREE RULES:
 	ruling.Usage = resp.Usage
 
 	return &ruling, nil
+}
+
+// orderEffects applies effects in the arbiter's execution order. Effects are attributed
+// to the actor whose entity they touch (or who carries it); unattributed effects keep
+// their relative order after the attributed ones. The sort is stable.
+func orderEffects(r *SceneRuling) {
+	if len(r.ExecutionOrder) == 0 || len(r.Effects) < 2 {
+		return
+	}
+	rank := make(map[EntityID]int, len(r.ExecutionOrder))
+	for i, id := range r.ExecutionOrder {
+		if _, seen := rank[id]; !seen {
+			rank[id] = i
+		}
+	}
+	position := func(e Effect) int {
+		for _, id := range []EntityID{e.EntityID, e.ParentID} {
+			if p, ok := rank[id]; ok {
+				return p
+			}
+		}
+		return len(rank)
+	}
+	sort.SliceStable(r.Effects, func(i, j int) bool {
+		return position(r.Effects[i]) < position(r.Effects[j])
+	})
 }

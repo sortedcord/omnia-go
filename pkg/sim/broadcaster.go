@@ -145,11 +145,7 @@ BROADCASTING RULES:
 
 	resp, err := b.client.ChatCompletion(ctx, req)
 	if err != nil {
-		// Fallback: use resolution text directly for everyone
-		for _, a := range in.Actors {
-			res.Perceptions[a.ID] = in.Resolution
-		}
-		return res, nil
+		return res, fmt.Errorf("broadcaster: request failed: %w", err)
 	}
 
 	res.Duration = time.Since(start)
@@ -157,22 +153,35 @@ BROADCASTING RULES:
 
 	var wire broadcastWireResponse
 	if err := llm.DecodeJSON(resp.Content, resp.ReasoningContent, &wire); err != nil {
-		for _, a := range in.Actors {
-			res.Perceptions[a.ID] = in.Resolution
-		}
-		return res, nil
+		return res, fmt.Errorf("broadcaster: invalid perception JSON: %w", err)
 	}
 
-	for idStr, pText := range wire.Perceptions {
-		res.Perceptions[EntityID(idStr)] = strings.TrimSpace(pText)
-	}
-
-	// Guarantee every actor has at least a fallback perception
 	for _, a := range in.Actors {
-		if strings.TrimSpace(res.Perceptions[a.ID]) == "" {
-			res.Perceptions[a.ID] = in.Resolution
+		text, ok := wire.Perceptions[string(a.ID)]
+		if !ok || (a.ActionTaken != "" && strings.TrimSpace(text) == "") {
+			return res, fmt.Errorf("broadcaster: missing perception for actor %q", a.ID)
 		}
+		res.Perceptions[a.ID] = strings.TrimSpace(text)
 	}
+	// Ignore unrequested actor IDs. Empty bystander perceptions are legitimate.
 
 	return res, nil
+}
+
+// minimalPerceptions is the safe fallback when no broadcaster result is available.
+// Each actor only learns what they themselves attempted and its verdict, never the
+// objective resolution, so ground truth cannot leak.
+func minimalPerceptions(actors []PerceiverInfo, results []ActorActionResult) map[EntityID]string {
+	out := make(map[EntityID]string, len(actors))
+	for _, r := range results {
+		switch r.Verdict {
+		case "preempted":
+			out[r.ActorID] = "Things move too fast; you never get to finish what you started."
+		case "altered":
+			out[r.ActorID] = "You try, but it doesn't quite go the way you meant it to."
+		default:
+			out[r.ActorID] = fmt.Sprintf("You go ahead: %s", r.ActionText)
+		}
+	}
+	return out
 }

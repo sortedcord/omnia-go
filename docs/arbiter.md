@@ -106,6 +106,8 @@ Because the Arbiter evaluates the actor's `Status` (weariness, heart rate, adren
 
 ## 5. Implementation (v1)
 
+> **Superseded in part by [`docs/scenes.md`](scenes.md).** The arbiter now resolves all intents of a scene in one call, `set_vital` became `set_attribute` / `remove_attribute`, and per-actor perceptions are written by the Broadcaster rather than the arbiter (`actor_perception` / `observer_perception` no longer exist).
+
 * **Core Engine**: Implemented in `pkg/sim/arbiter.go` and `pkg/sim/effects.go`.
 * **The Referee Loop**: `Simulation.Step` passes all `act` actions to `Arbiter.Resolve`, applying validated world mutations before fanning out sensory feeds.
 * **Whitelisted Structured Effects**:

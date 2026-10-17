@@ -67,10 +67,10 @@ type Simulation struct {
 	pendingIntent map[EntityID]string // actorID -> unfinished intent trajectory
 
 	// Dynamic Scenes
-	Scenes            map[SceneID]*Scene
-	SceneBonds        map[SceneID]SceneID // olderSceneID -> newerSceneID
-	ContestedEntities map[EntityID]bool
-	nextSceneID       int
+	Scenes      map[SceneID]*Scene
+	bonds       []sceneBond // temporary merges caused by cross-scene conflicts
+	nextSceneID int
+	lastTargets map[EntityID][]EntityID // actorID -> actors who targeted them last tick
 
 	// Thought Distillation
 	Distiller      ThoughtDistiller
@@ -99,24 +99,23 @@ func New(clock Clock, opts ...Option) *Simulation {
 	defaultLLM := llm.DefaultClient()
 
 	sim := &Simulation{
-		Clock:             clock,
-		Entities:          make(map[EntityID]*Entity),
-		FocusMap:          make(map[EntityID]map[EntityID]float64),
-		Summarizer:        NewLLMSummarizer(defaultLLM, "gemini-3.5-flash-lite"),
-		Arbiter:           NewLLMArbiter(defaultLLM, "gemini-3.5-flash-lite"),
-		Broadcaster:       NewLLMBroadcaster(defaultLLM, "gemini-3.5-flash-lite"),
-		Distiller:         NewLLMDistiller(defaultLLM, "gemini-3.5-flash-lite"),
-		Seed:              seed,
-		RNG:               rand.New(rand.NewSource(seed)),
-		pendingIntent:     make(map[EntityID]string),
-		Scenes:            make(map[SceneID]*Scene),
-		SceneBonds:        make(map[SceneID]SceneID),
-		ContestedEntities: make(map[EntityID]bool),
-		pendingDistill:    make(map[EntityID]chan DistillResult),
-		lastDistill:       make(map[EntityID]*DistillResult),
-		EventLog:          make([]Event, 0),
-		inbox:             make(map[EntityID][]Event),
-		scheduledEvents:   make(map[int][]Event),
+		Clock:           clock,
+		Entities:        make(map[EntityID]*Entity),
+		FocusMap:        make(map[EntityID]map[EntityID]float64),
+		Summarizer:      NewLLMSummarizer(defaultLLM, "gemini-3.5-flash-lite"),
+		Arbiter:         NewLLMArbiter(defaultLLM, "gemini-3.5-flash-lite"),
+		Broadcaster:     NewLLMBroadcaster(defaultLLM, "gemini-3.5-flash-lite"),
+		Distiller:       NewLLMDistiller(defaultLLM, "gemini-3.5-flash-lite"),
+		Seed:            seed,
+		RNG:             rand.New(rand.NewSource(seed)),
+		pendingIntent:   make(map[EntityID]string),
+		Scenes:          make(map[SceneID]*Scene),
+		lastTargets:     make(map[EntityID][]EntityID),
+		pendingDistill:  make(map[EntityID]chan DistillResult),
+		lastDistill:     make(map[EntityID]*DistillResult),
+		EventLog:        make([]Event, 0),
+		inbox:           make(map[EntityID][]Event),
+		scheduledEvents: make(map[int][]Event),
 	}
 
 	for _, opt := range opts {
@@ -306,7 +305,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 	}
 
 	// 2. Build and update Scenes from spatial topology + active conflict bonds
-	scenes := s.buildScenesLocked(currentTick)
+	s.buildScenesLocked(currentTick)
 
 	// 3. Identify active actors with pending inbox events
 	type candidateActor struct {
@@ -319,6 +318,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 		thoughts  string
 		selected  []actor.Thought
 		priorDist *DistillResult
+		stimulus  string
 	}
 
 	var candidates []candidateActor
@@ -427,22 +427,26 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 	var wg sync.WaitGroup
 
 	for i := range candidates {
+		c := &candidates[i]
+		var sb strings.Builder
+		sb.WriteString("=== CURRENT SURROUNDINGS (Your Perspective) ===\n")
+		sb.WriteString(c.view.Text)
+		sb.WriteString("\n\n=== RECENT SENSORY INGRESS ===\n")
+		for j, ev := range c.pending {
+			if j > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(ev.FormatForPerception())
+		}
+		c.stimulus = sb.String()
+	}
+
+	for i := range candidates {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
 			c := candidates[idx]
-
-			var sb strings.Builder
-			sb.WriteString("=== CURRENT SURROUNDINGS (Your Perspective) ===\n")
-			sb.WriteString(c.view.Text)
-			sb.WriteString("\n\n=== RECENT SENSORY INGRESS ===\n")
-			for j, ev := range c.pending {
-				if j > 0 {
-					sb.WriteString("\n")
-				}
-				sb.WriteString(ev.FormatForPerception())
-			}
-			stimulusText := sb.String()
+			stimulusText := c.stimulus
 
 			turn := Turn{
 				ActorID:   c.entity.ID,
@@ -484,15 +488,20 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 	for i, d := range decisions {
 		resolvedTargets := ResolveTargets(d.reaction.Action.Targets, d.candidate.view.Perceivable)
 
-		var latestTrigger *Event
+		// Spontaneity reacts to what the actor perceived last tick: the latest event,
+		// enriched with who targeted this actor in the previous tick's resolution.
+		var trigger Event
 		if len(d.candidate.pending) > 0 {
-			latestTrigger = &d.candidate.pending[len(d.candidate.pending)-1]
+			trigger = d.candidate.pending[len(d.candidate.pending)-1]
 		}
-		spontaneity := s.ComputeSpontaneity(d.candidate.entity.ID, currentTick, latestTrigger)
-
-		s.mu.Lock()
-		luck := s.RNG.Float64()
-		s.mu.Unlock()
+		s.mu.RLock()
+		if sources := s.lastTargets[d.candidate.entity.ID]; len(sources) > 0 {
+			trigger.Targets = append(trigger.Targets, d.candidate.entity.ID)
+			trigger.Sources = append(trigger.Sources, sources...)
+		}
+		s.mu.RUnlock()
+		spontaneity := s.ComputeSpontaneity(d.candidate.entity.ID, currentTick, &trigger)
+		luck := deterministicRoll(s.Seed, currentTick, d.candidate.entity.ID, "luck")
 
 		resolvedTurns[i] = resolvedTurn{
 			candidate:   d.candidate,
@@ -508,11 +517,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 	// Group resolved turns by SceneID
 	sceneTurns := make(map[SceneID][]resolvedTurn)
 	for _, rt := range resolvedTurns {
-		scID := rt.candidate.sceneID
-		if scID == "" {
-			scID = "scene-default"
-		}
-		sceneTurns[scID] = append(sceneTurns[scID], rt)
+		sceneTurns[rt.candidate.sceneID] = append(sceneTurns[rt.candidate.sceneID], rt)
 	}
 
 	// 7. PER-SCENE ARBITER ADJUDICATION (In Parallel)
@@ -639,9 +644,20 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 	})
 
 	s.mu.Lock()
+	targetsByActor := make(map[EntityID][]EntityID)
+	nextTargets := make(map[EntityID][]EntityID)
+	for _, rt := range resolvedTurns {
+		targetsByActor[rt.candidate.entity.ID] = rt.targets
+		for _, target := range rt.targets {
+			nextTargets[target] = append(nextTargets[target], rt.candidate.entity.ID)
+		}
+	}
+	s.lastTargets = nextTargets
+	s.renewBondsLocked(targetsByActor, currentTick)
 	tickMutated := make(map[EntityID]SceneID)
 	for _, ar := range adjResults {
 		if ar.scene != nil && ar.ruling != nil {
+			orderEffects(ar.ruling)
 			s.applySceneEffectsLocked(ar.scene, ar.ruling, tickMutated)
 			for _, v := range ar.ruling.Verdicts {
 				s.pendingIntent[v.ActorID] = v.RemainingIntent
@@ -721,12 +737,15 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				Actors:        actorsInfo,
 			}
 
-			bRes, err := s.Broadcaster.Broadcast(ctx, bInput)
-			if err != nil || len(bRes.Perceptions) == 0 {
-				bRes.Perceptions = make(map[EntityID]string)
-				for _, a := range actorsInfo {
-					bRes.Perceptions[a.ID] = res.ruling.Resolution
-				}
+			// Never fall back to the raw objective resolution: it would leak ground
+			// truth (hidden items, others' outcomes) into every actor's perception.
+			var bRes BroadcastResult
+			var err error
+			if s.Broadcaster != nil {
+				bRes, err = s.Broadcaster.Broadcast(ctx, bInput)
+			}
+			if s.Broadcaster == nil || err != nil {
+				bRes.Perceptions = minimalPerceptions(actorsInfo, actionResults)
 			}
 
 			bcastMu.Lock()
@@ -742,16 +761,30 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 
 	s.mu.Lock()
 	for _, ar := range adjResults {
+		// A scene can span several spaces, so tag the event with all of them.
+		// LocationID is only set when the scene has exactly one space.
+		var spaceIDs []EntityID
 		sceneLoc := EntityID("")
-		if ar.scene != nil && len(ar.scene.SpaceIDs) > 0 {
-			sceneLoc = ar.scene.SpaceIDs[0]
+		if ar.scene != nil {
+			spaceIDs = ar.scene.SpaceIDs
+			if len(spaceIDs) == 1 {
+				sceneLoc = spaceIDs[0]
+			}
 		}
 
+		var sources, targets []EntityID
+		for _, rt := range ar.turns {
+			sources = append(sources, rt.candidate.entity.ID)
+			targets = append(targets, rt.targets...)
+		}
 		ev := Event{
 			Tick:        currentTick,
 			Timestamp:   currentTimestamp,
 			LocationID:  sceneLoc,
 			SceneID:     ar.sceneID,
+			SpaceIDs:    spaceIDs,
+			Sources:     sources,
+			Targets:     targets,
 			Kind:        EventWorld,
 			Description: ar.ruling.Resolution,
 		}
@@ -765,6 +798,8 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 					Timestamp:   currentTimestamp,
 					LocationID:  sceneLoc,
 					SceneID:     ar.sceneID,
+					SpaceIDs:    spaceIDs,
+					Sources:     sources,
 					Kind:        EventOutcome,
 					Description: pText,
 				})
@@ -778,7 +813,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				SceneID:      ar.sceneID,
 				ActorID:      rt.candidate.entity.ID,
 				ActorName:    rt.candidate.entity.Name,
-				Stimulus:     rt.candidate.view.Text,
+				Stimulus:     rt.candidate.stimulus,
 				Reaction:     rt.reaction,
 				SceneRuling:  ar.ruling,
 				Thoughts:     rt.candidate.selected,
@@ -801,7 +836,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				Personality:   rt.candidate.entity.Mind.Profile.Personality,
 				Tick:          currentTick,
 				Timestamp:     currentTimestamp,
-				Stimulus:      rt.candidate.view.Text,
+				Stimulus:      rt.candidate.stimulus,
 				Cognition:     rt.reaction.Cognition,
 				Intent:        rt.reaction.Action.Action,
 				IsHuman:       isHuman,
@@ -826,8 +861,6 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			}(rt.candidate.entity.Mind, distInput, distChan)
 		}
 	}
-
-	_ = scenes
 
 	// 12. ADVANCE CLOCK & DECAY FOCUS
 	s.DecayFocus(0.70)

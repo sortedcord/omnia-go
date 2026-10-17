@@ -72,7 +72,8 @@ A **Scene** is a group of actors who can mutually perceive each other well enoug
 If actors in different scenes attempt to mutate the same shared boundary entity (e.g. a portal door) in the same tick:
 1. **Precedence**: Effects are executed in order of scene age (`CreatedTick`). The older scene's effects take precedence; conflicting effects from the newer scene are rejected and logged.
 2. **Temporary Bond**: The newer scene is absorbed into the older scene for the next tick, forming a single combined scene so one Arbiter adjudicates the contest directly.
-3. **Dissolution**: The bond persists as long as actors on both sides continue to interact with the contested entity, and dissolves on the first tick neither side acts upon it.
+3. **Dissolution**: The bond guarantees one merged tick. It is renewed while actors on both sides keep targeting the contested entity, and dissolves on the first tick they don't.
+4. **Scope**: Only portals can be contested; each scene may only mutate entities inside its own spaces or on its boundary.
 
 ---
 
@@ -104,11 +105,11 @@ To break conflicts fairly without relying on artificial alphabetical ordering:
 
 $$\text{Score} = 0.25 \cdot \text{Targeted} + 0.30 \cdot \text{Attention} + 0.20 \cdot \text{Readiness} + 0.10 \cdot \text{Proximity} + 0.15 \cdot \text{Jitter}$$
 
-* **Targeted**: `1.0` if this actor was directly addressed by name in recent scene events; `0.0` otherwise.
+* **Targeted**: `1.0` if another actor's resolved targets included this actor last tick; `0.0` otherwise. (This tick's targets are unknown while everyone deliberates in parallel.)
 * **Attention**: Dynamic focus level from the actor's `FocusMap` on the event source (normalized `0.0` to `1.0`).
 * **Readiness**: Derived from `arousal` attribute: `low` = `0.20`, `normal` = `0.50`, `high` = `0.85`.
 * **Proximity**: `1.0` for same space, `0.5` across open portal, `0.0` otherwise.
-* **Jitter**: Deterministic hash: $\text{hash}(\text{Seed}, \text{Tick}, \text{ActorID}) \pmod{1000} / 1000.0$. Guarantees reproducible scores regardless of parallel execution order.
+* **Jitter** and **Luck**: FNV-1a hash of (seed, tick, actor, salt), with separate salts. Reproducible regardless of goroutine order or how many other actors act.
 
 *Advisory Nature*: Spontaneity scores provide guidance to the Arbiter for settling simultaneous actions and interruptions; they never strip an actor's turn.
 

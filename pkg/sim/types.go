@@ -63,17 +63,20 @@ const (
 
 // Event is an objective log entry of something that happened in the simulation world.
 type Event struct {
-	Tick        int       `json:"tick"`
-	Timestamp   string    `json:"timestamp"`
-	LocationID  EntityID  `json:"location_id"`
-	SceneID     SceneID   `json:"scene_id,omitempty"`
-	SourceID    EntityID  `json:"source_id,omitempty"`   // Empty for environmental/world events
-	SourceName  string    `json:"source_name,omitempty"` // Display name of source entity
-	Kind        EventKind `json:"kind"`
-	Description string    `json:"description"`        // Objective canonical description
-	Observed    string    `json:"observed,omitempty"` // What co-present onlookers witness
-	Outcome     string    `json:"outcome,omitempty"`  // Ruling outcome: success, partial, failure, mishap, interrupted
-	Intent      string    `json:"intent,omitempty"`   // Original declared intent of the actor
+	Tick        int        `json:"tick"`
+	Timestamp   string     `json:"timestamp"`
+	LocationID  EntityID   `json:"location_id"`
+	SceneID     SceneID    `json:"scene_id,omitempty"`
+	SpaceIDs    []EntityID `json:"space_ids,omitempty"`   // Scene events span multiple spaces; no invented single location.
+	Targets     []EntityID `json:"targets,omitempty"`     // Resolved intended targets, not a visibility filter.
+	Sources     []EntityID `json:"sources,omitempty"`     // Contributors to a simultaneous perception.
+	SourceID    EntityID   `json:"source_id,omitempty"`   // Empty for environmental/world events
+	SourceName  string     `json:"source_name,omitempty"` // Display name of source entity
+	Kind        EventKind  `json:"kind"`
+	Description string     `json:"description"`        // Objective canonical description
+	Observed    string     `json:"observed,omitempty"` // What co-present onlookers witness
+	Outcome     string     `json:"outcome,omitempty"`  // Ruling outcome: success, partial, failure, mishap, interrupted
+	Intent      string     `json:"intent,omitempty"`   // Original declared intent of the actor
 }
 
 // FormatForPerception formats this event as perceived by a co-present observer in the room.

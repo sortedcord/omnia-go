@@ -2,216 +2,223 @@ package sim
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
-// SceneID is the unique identifier for a dynamically partitioned scene.
 type SceneID string
 
-// Scene represents a group of actors and enterable spaces that can mutually perceive
-// and interact with each other in real-time.
+// Scene is a connected interaction group, not a controller execution order.
 type Scene struct {
-	ID              SceneID    `json:"id"`
-	CreatedTick     int        `json:"created_tick"`
-	LastTick        int        `json:"last_tick"`
-	SpaceIDs        []EntityID `json:"space_ids"`
-	ActorIDs        []EntityID `json:"actor_ids"`
-	ContestedEntity EntityID   `json:"contested_entity,omitempty"` // Entity causing an inter-scene bond
-	BondedTo        SceneID    `json:"bonded_to,omitempty"`        // If bonded, the parent scene it merges with
+	ID          SceneID    `json:"id"`
+	CreatedTick int        `json:"created_tick"`
+	LastTick    int        `json:"last_tick"`
+	SpaceIDs    []EntityID `json:"space_ids"`
+	ActorIDs    []EntityID `json:"actor_ids"`
+	sequence    int
+	memberSince map[EntityID]int
 }
 
-// BuildScenes partitions the world into dynamic scenes based on spatial connectivity
-// and active inter-scene conflict bonds.
-func (s *Simulation) BuildScenes(currentTick int) map[SceneID]*Scene {
+// Bonds track actors, not scene IDs: scene IDs can disappear during a merge.
+type sceneBond struct {
+	Entity      EntityID
+	Left, Right []EntityID
+	LastTick    int
+}
+
+func olderScene(a, b *Scene) bool {
+	if a.CreatedTick != b.CreatedTick {
+		return a.CreatedTick < b.CreatedTick
+	}
+	return a.sequence < b.sequence
+}
+
+func (s *Simulation) BuildScenes(tick int) map[SceneID]*Scene {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.buildScenesLocked(currentTick)
+	return s.buildScenesLocked(tick)
 }
 
-func (s *Simulation) buildScenesLocked(currentTick int) map[SceneID]*Scene {
-	// 1. Identify all enterable spaces in the world
-	var enterableSpaces []EntityID
+func (s *Simulation) buildScenesLocked(tick int) map[SceneID]*Scene {
+	var spaces []EntityID
+	adjacency := map[EntityID][]EntityID{}
+	connect := func(a, b EntityID) { adjacency[a] = append(adjacency[a], b); adjacency[b] = append(adjacency[b], a) }
 	for id, e := range s.Entities {
 		if e.Space != nil && e.Space.Enterable {
-			enterableSpaces = append(enterableSpaces, id)
+			spaces = append(spaces, id)
 		}
 	}
-	sort.Slice(enterableSpaces, func(i, j int) bool {
-		return enterableSpaces[i] < enterableSpaces[j]
-	})
-
-	// 2. Build adjacency graph of spaces connected by open or transparent portals
-	adj := make(map[EntityID][]EntityID)
-	for _, spaceID := range enterableSpaces {
-		space := s.Entities[spaceID]
-		for _, childID := range space.Children {
-			child, ok := s.Entities[childID]
-			if !ok || child.Portal == nil {
+	slices.Sort(spaces)
+	for _, id := range spaces {
+		for _, childID := range s.Entities[id].Children {
+			child := s.Entities[childID]
+			if child == nil || child.Portal == nil {
 				continue
 			}
-			targetID := child.Portal.Target
-			targetSpace, ok := s.Entities[targetID]
-			if !ok || targetSpace.Space == nil || !targetSpace.Space.Enterable {
+			target := s.Entities[child.Portal.Target]
+			if target == nil || target.Space == nil || !target.Space.Enterable {
 				continue
 			}
-
-			// Open or transparent portal connects spaces
-			if !child.Portal.Closed || (child.Space != nil && child.Space.Transparent) {
-				adj[spaceID] = append(adj[spaceID], targetID)
-				adj[targetID] = append(adj[targetID], spaceID)
+			if !child.Portal.Closed || child.Portal.Transparent {
+				connect(id, target.ID)
 			}
 		}
 	}
-
-	// 3. Find connected components (BFS / DFS)
-	visited := make(map[EntityID]bool)
-	var components [][]EntityID
-
-	for _, spaceID := range enterableSpaces {
-		if visited[spaceID] {
+	activeBonds := s.bonds[:0]
+	for _, bond := range s.bonds {
+		if bond.LastTick < tick-1 {
 			continue
 		}
-		var comp []EntityID
-		queue := []EntityID{spaceID}
-		visited[spaceID] = true
+		var locations []EntityID
+		for _, id := range append(slices.Clone(bond.Left), bond.Right...) {
+			if loc, ok := s.whereLocked(id); ok {
+				locations = append(locations, loc.ID)
+			}
+		}
+		if len(locations) < 2 {
+			continue
+		}
+		for _, loc := range locations[1:] {
+			connect(locations[0], loc)
+		}
+		activeBonds = append(activeBonds, bond)
+	}
+	s.bonds = activeBonds
 
+	var components []*Scene
+	visited := map[EntityID]bool{}
+	for _, id := range spaces {
+		if visited[id] {
+			continue
+		}
+		visited[id] = true
+		queue := []EntityID{id}
+		component := &Scene{LastTick: tick, memberSince: map[EntityID]int{}}
 		for len(queue) > 0 {
-			curr := queue[0]
+			current := queue[0]
 			queue = queue[1:]
-			comp = append(comp, curr)
-
-			for _, neighbor := range adj[curr] {
-				if !visited[neighbor] {
-					visited[neighbor] = true
-					queue = append(queue, neighbor)
+			component.SpaceIDs = append(component.SpaceIDs, current)
+			for _, next := range adjacency[current] {
+				if !visited[next] {
+					visited[next] = true
+					queue = append(queue, next)
 				}
 			}
 		}
-
-		sort.Slice(comp, func(i, j int) bool {
-			return comp[i] < comp[j]
-		})
-		components = append(components, comp)
-	}
-
-	// 4. Map actors to each component
-	type rawComponent struct {
-		spaces []EntityID
-		actors []EntityID
-	}
-	rawComps := make([]rawComponent, len(components))
-
-	for i, comp := range components {
-		spaceSet := make(map[EntityID]bool)
-		for _, sp := range comp {
-			spaceSet[sp] = true
-		}
-
-		var actorsInComp []EntityID
-		for id, e := range s.Entities {
-			if e.Mind == nil {
+		slices.Sort(component.SpaceIDs)
+		for actorID, entity := range s.Entities {
+			if entity.Mind == nil {
 				continue
 			}
-			loc, ok := s.whereLocked(id)
-			if ok && loc != nil && spaceSet[loc.ID] {
-				actorsInComp = append(actorsInComp, id)
+			if loc, ok := s.whereLocked(actorID); ok && slices.Contains(component.SpaceIDs, loc.ID) {
+				component.ActorIDs = append(component.ActorIDs, actorID)
 			}
 		}
-
-		sort.Slice(actorsInComp, func(i, j int) bool {
-			return actorsInComp[i] < actorsInComp[j]
-		})
-
-		rawComps[i] = rawComponent{
-			spaces: comp,
-			actors: actorsInComp,
-		}
+		if len(component.ActorIDs) == 0 {
+			continue
+		} // Empty spaces belong to topology, not persistent scenes.
+		slices.Sort(component.ActorIDs)
+		components = append(components, component)
 	}
 
-	// 5. Match with previous scenes to preserve SceneIDs across ticks
-	newScenes := make(map[SceneID]*Scene)
-	usedPrevIDs := make(map[SceneID]bool)
-
-	for _, comp := range rawComps {
-		// Find overlapping previous scenes
-		prevMatches := make(map[SceneID]int)
-		for _, aID := range comp.actors {
-			for prevID, prevScene := range s.Scenes {
-				for _, prevActor := range prevScene.ActorIDs {
-					if prevActor == aID {
-						prevMatches[prevID]++
+	// Assign each previous scene to its largest surviving fragment BEFORE choosing
+	// identities for merges. A small, lexically earlier room cannot steal the ID.
+	owners := map[SceneID]int{}
+	previous := make([]*Scene, 0, len(s.Scenes))
+	for _, scene := range s.Scenes {
+		previous = append(previous, scene)
+	}
+	sort.Slice(previous, func(i, j int) bool { return olderScene(previous[i], previous[j]) })
+	for _, prev := range previous {
+		best, bestCount, bestSince := -1, 0, int(^uint(0)>>1)
+		for i, comp := range components {
+			count, since := 0, int(^uint(0)>>1)
+			for _, id := range comp.ActorIDs {
+				if slices.Contains(prev.ActorIDs, id) {
+					count++
+					joined := prev.memberSince[id]
+					if joined < since {
+						since = joined
 					}
+					comp.memberSince[id] = joined
 				}
 			}
-		}
-
-		var bestID SceneID
-		bestOverlap := -1
-		oldestTick := 999999
-
-		// On merge: oldest scene ID survives
-		// On split: largest group retains ID
-		for prevID, count := range prevMatches {
-			if usedPrevIDs[prevID] {
-				continue
-			}
-			prevScene := s.Scenes[prevID]
-			if count > bestOverlap || (count == bestOverlap && prevScene.CreatedTick < oldestTick) {
-				bestID = prevID
-				bestOverlap = count
-				oldestTick = prevScene.CreatedTick
+			if count > bestCount || (count > 0 && count == bestCount && since < bestSince) {
+				best, bestCount, bestSince = i, count, since
 			}
 		}
-
-		if bestID == "" {
-			// Generate new SceneID
+		if best >= 0 {
+			owners[prev.ID] = best
+		}
+	}
+	next := map[SceneID]*Scene{}
+	for i, comp := range components {
+		for _, prev := range previous {
+			if owner, ok := owners[prev.ID]; ok && owner == i {
+				comp.ID, comp.CreatedTick, comp.sequence = prev.ID, prev.CreatedTick, prev.sequence
+				break // Previous scenes are ordered oldest first.
+			}
+		}
+		if comp.ID == "" {
 			s.nextSceneID++
-			bestID = SceneID(fmt.Sprintf("scene-%d", s.nextSceneID))
-			oldestTick = currentTick
+			comp.ID = SceneID(fmt.Sprintf("scene-%d", s.nextSceneID))
+			comp.CreatedTick, comp.sequence = tick, s.nextSceneID
 		}
-		usedPrevIDs[bestID] = true
-
-		newScenes[bestID] = &Scene{
-			ID:          bestID,
-			CreatedTick: oldestTick,
-			LastTick:    currentTick,
-			SpaceIDs:    comp.spaces,
-			ActorIDs:    comp.actors,
+		for _, id := range comp.ActorIDs {
+			if _, ok := comp.memberSince[id]; !ok {
+				comp.memberSince[id] = tick
+			}
 		}
+		next[comp.ID] = comp
 	}
-
-	// 6. Handle active conflict bonds: merge newer scene into older scene
-	for bondTarget, bondSource := range s.SceneBonds {
-		targetScene, hasTarget := newScenes[bondTarget]
-		sourceScene, hasSource := newScenes[bondSource]
-
-		if hasTarget && hasSource && bondTarget != bondSource {
-			// Absorb source into target (older scene)
-			targetScene.SpaceIDs = append(targetScene.SpaceIDs, sourceScene.SpaceIDs...)
-			targetScene.ActorIDs = append(targetScene.ActorIDs, sourceScene.ActorIDs...)
-			targetScene.BondedTo = bondTarget
-			delete(newScenes, bondSource)
-		}
-	}
-
-	s.Scenes = newScenes
-	return newScenes
+	s.Scenes = next
+	return next
 }
 
-// SceneForActor returns the Scene an actor currently belongs to.
-func (s *Simulation) SceneForActor(actorID EntityID) (*Scene, bool) {
+func (s *Simulation) SceneForActor(id EntityID) (*Scene, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.sceneForActorLocked(actorID)
+	return s.sceneForActorLocked(id)
 }
-
-func (s *Simulation) sceneForActorLocked(actorID EntityID) (*Scene, bool) {
-	for _, sc := range s.Scenes {
-		for _, aID := range sc.ActorIDs {
-			if aID == actorID {
-				return sc, true
-			}
+func (s *Simulation) sceneForActorLocked(id EntityID) (*Scene, bool) {
+	for _, scene := range s.Scenes {
+		if slices.Contains(scene.ActorIDs, id) {
+			return scene, true
 		}
 	}
 	return nil, false
+}
+
+func (s *Simulation) bondScenesLocked(entity EntityID, older, newer SceneID) {
+	left, right := s.Scenes[older], s.Scenes[newer]
+	if left == nil || right == nil {
+		return
+	}
+	for i := range s.bonds {
+		bond := &s.bonds[i]
+		if bond.Entity == entity && slices.Equal(bond.Left, left.ActorIDs) && slices.Equal(bond.Right, right.ActorIDs) {
+			bond.LastTick = s.Clock.TickCount
+			return
+		}
+	}
+	s.bonds = append(s.bonds, sceneBond{Entity: entity, Left: slices.Clone(left.ActorIDs), Right: slices.Clone(right.ActorIDs), LastTick: s.Clock.TickCount})
+}
+
+// A conflict guarantees one merged tick. Continuing attention from both sides
+// renews it; otherwise topology takes over on the following tick.
+func (s *Simulation) renewBondsLocked(targets map[EntityID][]EntityID, tick int) {
+	for i := range s.bonds {
+		bond := &s.bonds[i]
+		touches := func(group []EntityID) bool {
+			for _, id := range group {
+				if slices.Contains(targets[id], bond.Entity) {
+					return true
+				}
+			}
+			return false
+		}
+		if touches(bond.Left) && touches(bond.Right) {
+			bond.LastTick = tick
+		}
+	}
 }

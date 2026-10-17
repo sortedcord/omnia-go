@@ -8,6 +8,22 @@ import (
 	"omnia.adityagupta.dev/pkg/actor"
 )
 
+// inSceneReachLocked reports whether an entity is inside one of the scene's spaces,
+// or is a portal with either side in the scene. Caller must hold s.mu.
+func (s *Simulation) inSceneReachLocked(id EntityID, spaces map[EntityID]bool) bool {
+	e := s.Entities[id]
+	if e == nil {
+		return false
+	}
+	if spaces[id] {
+		return true
+	}
+	if loc, ok := s.whereLocked(id); ok && spaces[loc.ID] {
+		return true
+	}
+	return e.Portal != nil && spaces[e.Portal.Target]
+}
+
 // applySceneEffectsLocked executes the Arbiter's requested mutations for a scene.
 // It detects cross-scene conflicts: if a newer scene tries to mutate an entity already
 // modified by an older scene in the same tick, the effect is rejected and an inter-scene
@@ -20,20 +36,20 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 	}
 
 	for _, eff := range ruling.Effects {
-		// Conflict Detection: check if entity was already mutated this tick by an older scene
-		if olderSceneID, alreadyMutated := tickMutated[eff.EntityID]; alreadyMutated && olderSceneID != scene.ID {
+		// Scope: a scene may only mutate what is inside its own spaces, or a portal on its boundary.
+		if !s.inSceneReachLocked(eff.EntityID, sceneSpaces) {
 			ruling.RejectedEffects = append(ruling.RejectedEffects,
-				fmt.Sprintf("conflict: entity %q was already modified by older scene %q; bonding scenes for next tick", eff.EntityID, olderSceneID))
-
-			// Bond scenes for next tick: older scene absorbs newer scene
-			if s.SceneBonds == nil {
-				s.SceneBonds = make(map[SceneID]SceneID)
-			}
-			s.SceneBonds[olderSceneID] = scene.ID
-			s.ContestedEntities[eff.EntityID] = true
+				fmt.Sprintf("scope: entity %q is outside scene %q", eff.EntityID, scene.ID))
 			continue
 		}
-
+		// Conflict: only shared boundary entities (portals) can be touched by two scenes in one tick.
+		// Effects are applied oldest scene first, so the first writer is the older scene.
+		if owner, taken := tickMutated[eff.EntityID]; taken && owner != scene.ID {
+			ruling.RejectedEffects = append(ruling.RejectedEffects,
+				fmt.Sprintf("conflict: %q already changed by older scene %q; scenes bonded for next tick", eff.EntityID, owner))
+			s.bondScenesLocked(eff.EntityID, owner, scene.ID)
+			continue
+		}
 		switch eff.Type {
 		case EffectMove:
 			targetEntity, ok := s.Entities[eff.EntityID]
@@ -99,7 +115,6 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 				continue
 			}
 
-			tickMutated[eff.EntityID] = scene.ID
 			ruling.AppliedEffects = append(ruling.AppliedEffects, eff)
 
 		case EffectSetCondition:
@@ -123,7 +138,6 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 				spaceEntity.Space.Conditions[eff.Key] = eff.Value
 			}
 			spaceEntity.Revision++
-			tickMutated[eff.EntityID] = scene.ID
 			ruling.AppliedEffects = append(ruling.AppliedEffects, eff)
 
 		case EffectSetPortal:
@@ -143,7 +157,7 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 				}
 			}
 			portalEntity.Revision++
-			tickMutated[eff.EntityID] = scene.ID
+			tickMutated[eff.EntityID] = scene.ID // portals are the only shared boundary entities
 			ruling.AppliedEffects = append(ruling.AppliedEffects, eff)
 
 		case EffectSetAttribute:
@@ -164,7 +178,6 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 				continue
 			}
 			targetEntity.Revision++
-			tickMutated[eff.EntityID] = scene.ID
 			ruling.AppliedEffects = append(ruling.AppliedEffects, eff)
 
 		case EffectRemoveAttribute:
@@ -178,7 +191,6 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 				continue
 			}
 			targetEntity.Revision++
-			tickMutated[eff.EntityID] = scene.ID
 			ruling.AppliedEffects = append(ruling.AppliedEffects, eff)
 
 		case EffectSetOpen:
@@ -190,7 +202,6 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 			if eff.Open != nil {
 				openEntity.Space.Open = *eff.Open
 				openEntity.Revision++
-				tickMutated[eff.EntityID] = scene.ID
 				ruling.AppliedEffects = append(ruling.AppliedEffects, eff)
 			}
 
@@ -202,7 +213,6 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 			}
 			revealEntity.Link.Concealed = false
 			revealEntity.Revision++
-			tickMutated[eff.EntityID] = scene.ID
 			ruling.AppliedEffects = append(ruling.AppliedEffects, eff)
 
 		default:

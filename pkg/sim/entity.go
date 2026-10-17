@@ -39,10 +39,11 @@ type Space struct {
 
 // Portal connects two spaces through an opening or barrier (e.g. a door, hatch, window, or corridor).
 type Portal struct {
-	Target    EntityID `json:"target"`
-	Direction string   `json:"direction,omitempty"` // e.g. "north", "up", "bulkhead hatch"
-	Closed    bool     `json:"closed"`
-	Locked    bool     `json:"locked"`
+	Target      EntityID `json:"target"`
+	Direction   string   `json:"direction,omitempty"` // e.g. "north", "up", "bulkhead hatch"
+	Transparent bool     `json:"transparent"`
+	Closed      bool     `json:"closed"`
+	Locked      bool     `json:"locked"`
 }
 
 // Entity is the universal building block for everything in the simulation:
