@@ -204,7 +204,7 @@ func TestHTTPClientSchemaFallback(t *testing.T) {
 		ResponseFormat: StrictSchema("action_schema", "action", schema),
 	}
 
-	// 1. First call: attempts json_schema (fails 400), retries with json_object (succeeds 200)
+	// 1. First call: attempts json_schema (fails 400), retries with json_object (succeeds 200). Consecutive failures = 1.
 	resp, err := client.ChatCompletion(context.Background(), req)
 	if err != nil {
 		t.Fatalf("expected fallback to succeed, got error: %v", err)
@@ -216,16 +216,30 @@ func TestHTTPClientSchemaFallback(t *testing.T) {
 		t.Fatalf("expected 2 attempts on first call (initial + fallback), got %d", attempts)
 	}
 
-	// 2. Second call: capability fallback should be cached; directly sends json_object (1 attempt)
+	// 2. Second call: threshold is 2, so it tries json_schema once more (fails 400), retries with json_object (succeeds 200).
+	// Consecutive failures reaches threshold (2) -> permanently caches disableJSONSchema!
 	attempts = 0
 	resp2, err := client.ChatCompletion(context.Background(), req)
 	if err != nil {
-		t.Fatalf("expected cached fallback to succeed, got error: %v", err)
+		t.Fatalf("expected fallback to succeed on second call, got error: %v", err)
 	}
 	if resp2.Content != `{"action_type":"speak","action":"hello"}` {
 		t.Fatalf("unexpected content: %s", resp2.Content)
 	}
+	if attempts != 2 {
+		t.Fatalf("expected 2 attempts on second call, got %d", attempts)
+	}
+
+	// 3. Third call: capability fallback is now cached; directly sends json_object (1 attempt)
+	attempts = 0
+	resp3, err := client.ChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("expected cached fallback to succeed on third call, got error: %v", err)
+	}
+	if resp3.Content != `{"action_type":"speak","action":"hello"}` {
+		t.Fatalf("unexpected content: %s", resp3.Content)
+	}
 	if attempts != 1 {
-		t.Fatalf("expected 1 attempt on second call (using cached capability), got %d", attempts)
+		t.Fatalf("expected 1 attempt on third call (using cached capability), got %d", attempts)
 	}
 }

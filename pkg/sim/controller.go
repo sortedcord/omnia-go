@@ -17,14 +17,15 @@ var ErrQuit = errors.New("sim: human controller requested quit")
 
 // Turn represents the sensory context provided to a controller to elicit an action.
 type Turn struct {
-	ActorID    EntityID
-	ActorName  string
-	Tick       int
-	Timestamp  string
-	Stimulus   string // The LOD-rendered surroundings and new sensory events
-	Relevant   map[string]float64
-	Thoughts   string // Active thought context for human player viewing
-	Attributes map[string]string
+	ActorID          EntityID
+	ActorName        string
+	Tick             int
+	Timestamp        string
+	Stimulus         string // The LOD-rendered surroundings and new sensory events
+	Relevant         map[string]float64
+	Thoughts         string // Active thought context for human player viewing
+	Attributes       map[string]string
+	TargetCandidates []string // Candidate target names for action schema
 }
 
 // Controller defines the interface for what directs an actor's decisions.
@@ -52,6 +53,7 @@ func (c *LLMController) Decide(ctx context.Context, mind *actor.Actor, turn Turn
 		Description: turn.Stimulus,
 		Relevant:    turn.Relevant,
 		Attributes:  turn.Attributes,
+		Targets:     turn.TargetCandidates,
 	}
 	return mind.React(ctx, stimulus)
 }
@@ -179,20 +181,13 @@ RULES:
 	userPrompt := fmt.Sprintf("CURRENT SURROUNDINGS & PERCEPTION:\n%s\n\nPLAYER'S RAW INPUT:\n%q\n\nConvert to action JSON:",
 		turn.Stimulus, rawInput)
 
-	var targetNames []string
-	if len(turn.Relevant) > 0 {
-		for name := range turn.Relevant {
-			targetNames = append(targetNames, name)
-		}
-	}
-
 	req := llm.ChatRequest{
 		Model: h.model,
 		Messages: []llm.Message{
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: userPrompt},
 		},
-		ResponseFormat: actor.ActionResponseFormat(targetNames),
+		ResponseFormat: actor.ActionResponseFormat(turn.TargetCandidates),
 	}
 
 	resp, err := h.client.ChatCompletion(ctx, req)

@@ -119,7 +119,7 @@ Because the Arbiter evaluates the actor's `Status` (weariness, heart rate, adren
   * `reveal`: Clears concealment on uncovered or searched items.
 * **Structured Outputs Contract**:
   * The Arbiter uses OpenAI-compatible Structured Outputs (`response_format: {type: "json_schema", strict: true}`).
-  * Output shape is enforced by grammar: `execution_order` $\to$ `verdicts` (keyed by actor ID) $\to$ `resolution` $\to$ `effects` (flat nullable object with `type` enum).
+  * Output shape is enforced by grammar: `execution_order` -> `verdicts` (keyed by actor ID) -> `resolution` -> `effects` (flat nullable object with `type` enum).
   * Entity IDs and actor IDs are constrained dynamically via schema enums directly from scene context.
   * Prompts contain zero JSON skeletons or output boilerplate, focusing strictly on physics arbitration, simultaneity, and attribute ACL principles.
 * **Actor Outcome Feedback**: The actor's inbox immediately receives their personal second-person sensory perception synthesized by the Broadcaster, waking them on the following tick to observe what actually happened.

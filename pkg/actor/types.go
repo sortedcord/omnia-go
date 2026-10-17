@@ -76,6 +76,7 @@ type SensoryEvent struct {
 	Description string             `json:"description"` // What the actor's senses register
 	Relevant    map[string]float64 `json:"-"`           // Entity IDs currently in perception/focus -> weight
 	Attributes  map[string]string  `json:"-"`           // Actor's own somatic/psychological attributes accessible to self
+	Targets     []string           `json:"-"`           // Names of perceivable entities available as targets
 }
 
 // String formats the sensory event for prompt injection.

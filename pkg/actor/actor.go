@@ -165,7 +165,7 @@ func (a *Actor) FormatThoughtContext(tick int, relevant map[string]float64) stri
 func (a *Actor) React(ctx context.Context, stimulus SensoryEvent) (*Reaction, error) {
 	messages := a.buildMessages(stimulus)
 
-	rf := ActionResponseFormat(nil)
+	rf := ActionResponseFormat(stimulus.Targets)
 	if a.responseSchema != nil {
 		rf = a.responseSchema(stimulus)
 	}
@@ -188,16 +188,18 @@ func (a *Actor) React(ctx context.Context, stimulus SensoryEvent) (*Reaction, er
 		return nil, fmt.Errorf("actor %q returned malformed action JSON: %w (content: %q)", a.Profile.Name, err, resp.Content)
 	}
 
+	cleanedCognition := CleanCognition(resp.ReasoningContent)
+
 	// Persist this subjective experience into the actor's memory bank
 	a.Memory.RecordTurn(TurnMemory{
 		Timestamp: stimulus.Timestamp,
 		Stimulus:  stimulus.Description,
-		Cognition: resp.ReasoningContent,
+		Cognition: cleanedCognition,
 		Action:    action,
 	})
 
 	return &Reaction{
-		Cognition: resp.ReasoningContent,
+		Cognition: cleanedCognition,
 		Action:    action,
 		Usage:     resp.Usage,
 		Duration:  resp.Duration,

@@ -56,6 +56,9 @@ func TestDistillerStructuredOutputsAndClamping(t *testing.T) {
 		Perceivable: []EntityRef{
 			{ID: "entity-1", Name: "Table"},
 		},
+		KnownEntities: map[string]string{
+			"kitchenette": "Open Kitchenette",
+		},
 	}
 
 	res, err := distiller.Distill(context.Background(), input)

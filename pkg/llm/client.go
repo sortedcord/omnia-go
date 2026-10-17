@@ -66,12 +66,14 @@ func DefaultClient() Client {
 
 // HTTPClient implements Client using standard net/http against OpenAI-compatible endpoints.
 type HTTPClient struct {
-	endpoint          string
-	apiKey            string
-	httpClient        *http.Client
-	fallbackMu        sync.RWMutex
-	disableJSONSchema bool
-	enableFallback    bool
+	endpoint                  string
+	apiKey                    string
+	httpClient                *http.Client
+	fallbackMu                sync.RWMutex
+	disableJSONSchema         bool
+	consecutiveSchemaFailures int
+	schemaFailureThreshold    int
+	enableFallback            bool
 }
 
 // NewHTTPClient creates a new OpenAI-compatible Chat Completions client.
@@ -88,7 +90,8 @@ func NewHTTPClient(baseURL, apiKey string, opts ...Option) *HTTPClient {
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
-		enableFallback: true,
+		enableFallback:         true,
+		schemaFailureThreshold: 2,
 	}
 
 	for _, opt := range opts {
@@ -114,6 +117,11 @@ func (c *HTTPClient) ChatCompletion(ctx context.Context, req ChatRequest) (*Chat
 
 	resp, statusCode, err := c.doRoundTripWithStatus(ctx, req)
 	if err == nil {
+		if isSchema {
+			c.fallbackMu.Lock()
+			c.consecutiveSchemaFailures = 0
+			c.fallbackMu.Unlock()
+		}
 		return resp, nil
 	}
 
@@ -123,7 +131,10 @@ func (c *HTTPClient) ChatCompletion(ctx context.Context, req ChatRequest) (*Chat
 		fallbackResp, _, fallbackErr := c.doRoundTripWithStatus(ctx, fallbackReq)
 		if fallbackErr == nil {
 			c.fallbackMu.Lock()
-			c.disableJSONSchema = true
+			c.consecutiveSchemaFailures++
+			if c.consecutiveSchemaFailures >= c.schemaFailureThreshold {
+				c.disableJSONSchema = true
+			}
 			c.fallbackMu.Unlock()
 			return fallbackResp, nil
 		}

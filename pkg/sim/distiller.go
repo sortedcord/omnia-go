@@ -151,9 +151,25 @@ DISTILLATION RULES:
 	sb.WriteString(fmt.Sprintf("ACTOR'S DECLARED INTENT:\n%q\n\n", in.Intent))
 	sb.WriteString("Distill cognitive updates into structured thought ops:")
 
+	seenLinks := make(map[string]bool)
 	var linkIDs []string
+	addLink := func(id string) {
+		id = strings.TrimSpace(id)
+		if id != "" && !seenLinks[id] {
+			seenLinks[id] = true
+			linkIDs = append(linkIDs, id)
+		}
+	}
 	for _, p := range in.Perceivable {
-		linkIDs = append(linkIDs, string(p.ID))
+		addLink(string(p.ID))
+	}
+	for id := range in.KnownEntities {
+		addLink(id)
+	}
+
+	var schemaLinkIDs []string
+	if len(linkIDs) <= 250 {
+		schemaLinkIDs = linkIDs
 	}
 
 	req := llm.ChatRequest{
@@ -162,7 +178,7 @@ DISTILLATION RULES:
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: sb.String()},
 		},
-		ResponseFormat:   llm.StrictSchema("thought_distillation", "Mental graph mutations reflecting subjective experience.", DistillerSchema(linkIDs)),
+		ResponseFormat:   llm.StrictSchema("thought_distillation", "Mental graph mutations reflecting subjective experience.", DistillerSchema(schemaLinkIDs)),
 		ReasoningEffort:  llm.ReasoningLow, // Low reasoning effort is fast and concise
 		IncludeReasoning: true,
 	}

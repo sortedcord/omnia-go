@@ -66,6 +66,7 @@ func TestActorReactSendsStrictSchema(t *testing.T) {
 		Tick:        1,
 		Timestamp:   "18:35:00 UTC",
 		Description: "Zack arrived.",
+		Targets:     []string{"Zack", "Mia"},
 	}
 
 	rx, err := actor.React(context.Background(), stimulus)
@@ -93,5 +94,11 @@ func TestActorReactSendsStrictSchema(t *testing.T) {
 	}
 	if !req.ResponseFormat.JSONSchema.Strict {
 		t.Fatal("expected Strict: true on schema")
+	}
+
+	// Verify target enum is wired
+	targetsProp := req.ResponseFormat.JSONSchema.Schema.Properties[2]
+	if targetsProp.Name != "targets" || targetsProp.Schema.Items == nil || len(targetsProp.Schema.Items.Enum) != 2 {
+		t.Fatalf("expected targets items to be constrained to 2 enum values, got: %+v", targetsProp)
 	}
 }

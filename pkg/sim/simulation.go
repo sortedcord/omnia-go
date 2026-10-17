@@ -478,15 +478,23 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			c := candidates[idx]
 			stimulusText := c.stimulus
 
+			var targetCandidates []string
+			for _, p := range c.view.Perceivable {
+				if p.ID != c.entity.ID {
+					targetCandidates = append(targetCandidates, p.Name)
+				}
+			}
+
 			turn := Turn{
-				ActorID:    c.entity.ID,
-				ActorName:  c.entity.Name,
-				Tick:       currentTick,
-				Timestamp:  currentTimestamp,
-				Stimulus:   stimulusText,
-				Relevant:   c.relevant,
-				Thoughts:   c.thoughts,
-				Attributes: c.entity.Attributes.AccessibleTo(c.entity.ID),
+				ActorID:          c.entity.ID,
+				ActorName:        c.entity.Name,
+				Tick:             currentTick,
+				Timestamp:        currentTimestamp,
+				Stimulus:         stimulusText,
+				Relevant:         c.relevant,
+				Thoughts:         c.thoughts,
+				Attributes:       c.entity.Attributes.AccessibleTo(c.entity.ID),
+				TargetCandidates: targetCandidates,
 			}
 
 			reaction, err := c.entity.Controller.Decide(ctx, c.entity.Mind, turn)
