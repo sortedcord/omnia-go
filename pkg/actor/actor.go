@@ -62,6 +62,13 @@ func WithSystemPrompt(prompt SystemPrompt) Option {
 	}
 }
 
+// WithResponseSchema configures a custom response schema generator for this actor.
+func WithResponseSchema(fn func(stimulus SensoryEvent) *llm.ResponseFormat) Option {
+	return func(a *Actor) {
+		a.responseSchema = fn
+	}
+}
+
 // Actor represents an autonomous, subjective entity in the simulation.
 type Actor struct {
 	Profile       Profile
@@ -71,6 +78,7 @@ type Actor struct {
 	client          llm.Client
 	model           string
 	reasoningEffort llm.ReasoningEffort
+	responseSchema  func(stimulus SensoryEvent) *llm.ResponseFormat
 }
 
 // New creates a new Actor with the provided profile and optional configurations.
@@ -157,10 +165,15 @@ func (a *Actor) FormatThoughtContext(tick int, relevant map[string]float64) stri
 func (a *Actor) React(ctx context.Context, stimulus SensoryEvent) (*Reaction, error) {
 	messages := a.buildMessages(stimulus)
 
+	rf := ActionResponseFormat(nil)
+	if a.responseSchema != nil {
+		rf = a.responseSchema(stimulus)
+	}
+
 	req := llm.ChatRequest{
 		Model:            a.model,
 		Messages:         messages,
-		ResponseFormat:   llm.JSONObject(),
+		ResponseFormat:   rf,
 		ReasoningEffort:  a.reasoningEffort,
 		IncludeReasoning: true,
 	}

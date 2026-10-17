@@ -169,25 +169,22 @@ func (h *HumanController) interpret(ctx context.Context, mind *actor.Actor, turn
 
 	systemPrompt := fmt.Sprintf(`You are an intent interpreter for an interactive simulation.
 A human player is controlling the character "%s".
-Convert the player's natural language input into a structured action JSON matching this schema:
-{
-  "action_type": "speak" | "act" | "wait",
-  "action": "<interpreted description>",
-  "targets": ["<name of person or entity addressed or targeted>"]
-}
+Convert the player's natural language input into their intended action according to the structured schema.
 
 RULES:
-1. Intent Classification:
-   - If the player is talking aloud (e.g. 'say "Stop!"' or 'shout to Drake that the door is jammed'), action_type is "speak", and action is the exact spoken text.
-   - If the player is doing something physical (e.g. 'dive behind the crate', 'pick up the scanner', 'run to the door'), action_type is "act".
-   - If the player is waiting, hesitating, or observing (e.g. 'do nothing', 'wait', 'watch what happens'), action_type is "wait".
-2. No God-Moding: If the player claims success (e.g. 'I shoot the drone and destroy it'), convert it into an ATTEMPT (e.g. 'Aim at the drone and fire'). The simulation's Arbiter will decide the actual outcome.
-3. Pronoun Resolution: Use the provided context to resolve vague references (e.g. if player says 'grab it', and stimulus mentions a scanner, action is 'Reach to grab the scanner').
-4. Phrasing: Format "action" as a concise first-person/imperative intent (e.g. 'Lunge toward the manual breaker box').
-5. Output MUST be ONLY valid standard JSON using double quotes.`, actorName)
+1. No God-Moding: If the player claims success (e.g. 'I shoot the drone and destroy it'), convert it into an ATTEMPT (e.g. 'Aim at the drone and fire'). The simulation's Arbiter will decide the actual outcome.
+2. Pronoun Resolution: Use the provided surroundings to resolve vague references (e.g. if player says 'grab it', and stimulus mentions a scanner, action is 'Reach to grab the scanner').
+3. Phrasing: Format "action" as a concise first-person/imperative intent (e.g. 'Lunge toward the manual breaker box').`, actorName)
 
 	userPrompt := fmt.Sprintf("CURRENT SURROUNDINGS & PERCEPTION:\n%s\n\nPLAYER'S RAW INPUT:\n%q\n\nConvert to action JSON:",
 		turn.Stimulus, rawInput)
+
+	var targetNames []string
+	if len(turn.Relevant) > 0 {
+		for name := range turn.Relevant {
+			targetNames = append(targetNames, name)
+		}
+	}
 
 	req := llm.ChatRequest{
 		Model: h.model,
@@ -195,7 +192,7 @@ RULES:
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: userPrompt},
 		},
-		ResponseFormat: llm.JSONObject(),
+		ResponseFormat: actor.ActionResponseFormat(targetNames),
 	}
 
 	resp, err := h.client.ChatCompletion(ctx, req)
