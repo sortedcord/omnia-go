@@ -449,13 +449,14 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			stimulusText := c.stimulus
 
 			turn := Turn{
-				ActorID:   c.entity.ID,
-				ActorName: c.entity.Name,
-				Tick:      currentTick,
-				Timestamp: currentTimestamp,
-				Stimulus:  stimulusText,
-				Relevant:  c.relevant,
-				Thoughts:  c.thoughts,
+				ActorID:    c.entity.ID,
+				ActorName:  c.entity.Name,
+				Tick:       currentTick,
+				Timestamp:  currentTimestamp,
+				Stimulus:   stimulusText,
+				Relevant:   c.relevant,
+				Thoughts:   c.thoughts,
+				Attributes: c.entity.Attributes.AccessibleTo(c.entity.ID),
 			}
 
 			reaction, err := c.entity.Controller.Decide(ctx, c.entity.Mind, turn)
@@ -561,12 +562,6 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				if prev := s.pendingIntent[rt.candidate.entity.ID]; prev != "" {
 					intentText = fmt.Sprintf("%s (continuing previous intent: %s)", intentText, prev)
 				}
-				attrMap := make(map[string]string)
-				if rt.candidate.entity.Mind != nil {
-					for k, v := range rt.candidate.entity.Mind.Attributes {
-						attrMap[k] = v.Value
-					}
-				}
 				intents[idx] = ActorIntent{
 					ActorID:     rt.candidate.entity.ID,
 					ActorName:   rt.candidate.entity.Name,
@@ -575,7 +570,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 					Targets:     rt.targets,
 					Spontaneity: rt.spontaneity,
 					Luck:        rt.luck,
-					Attributes:  attrMap,
+					Attributes:  rt.candidate.entity.Attributes.AccessibleTo(rt.candidate.entity.ID),
 				}
 			}
 			s.mu.RUnlock()

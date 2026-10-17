@@ -17,13 +17,14 @@ var ErrQuit = errors.New("sim: human controller requested quit")
 
 // Turn represents the sensory context provided to a controller to elicit an action.
 type Turn struct {
-	ActorID   EntityID
-	ActorName string
-	Tick      int
-	Timestamp string
-	Stimulus  string // The LOD-rendered surroundings and new sensory events
-	Relevant  map[string]float64
-	Thoughts  string // Active thought context for human player viewing
+	ActorID    EntityID
+	ActorName  string
+	Tick       int
+	Timestamp  string
+	Stimulus   string // The LOD-rendered surroundings and new sensory events
+	Relevant   map[string]float64
+	Thoughts   string // Active thought context for human player viewing
+	Attributes map[string]string
 }
 
 // Controller defines the interface for what directs an actor's decisions.
@@ -50,6 +51,7 @@ func (c *LLMController) Decide(ctx context.Context, mind *actor.Actor, turn Turn
 		Timestamp:   turn.Timestamp,
 		Description: turn.Stimulus,
 		Relevant:    turn.Relevant,
+		Attributes:  turn.Attributes,
 	}
 	return mind.React(ctx, stimulus)
 }

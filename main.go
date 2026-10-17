@@ -138,11 +138,7 @@ func main() {
 			"React naturally to Nelly's awkwardness without making her completely combust",
 		},
 	}
-	zackAttrs := actor.NewAttributes()
-	_ = zackAttrs.Set("mood", "Mildly bewildered, dryly amused, assessing the disaster")
-	_ = zackAttrs.Set("arousal", "normal")
-	_ = zackAttrs.Set("Awkwardness Bar", "Rising")
-	zackMind := actor.New(zackProfile, actor.WithAttributes(zackAttrs))
+	zackMind := actor.New(zackProfile)
 
 	// Seed Zack's initial thoughts
 	zackMind.AddThought(actor.Thought{
@@ -165,6 +161,11 @@ func main() {
 	})
 
 	zackEntity, _ := world.SpawnActor("zack", zackMind, livingRoom.ID, "A college student in casual clothes, standing near the doorway looking mildly bemused.")
+	_ = zackEntity.Attributes.Set("mood", "Mildly bewildered, dryly amused, assessing the disaster")
+	_ = zackEntity.Attributes.Set("arousal", "normal")
+	_ = zackEntity.Attributes.Set("Awkwardness Bar", "Rising")
+	// Private attribute accessible only to Zack:
+	_ = zackEntity.Attributes.SetWithVisibility("Internal Sarcasm", "Barely keeping a straight face", sim.VisibilityPrivate, []sim.EntityID{"zack"})
 
 	jacket, _ := world.SpawnEntity("zack-jacket", "Canvas Jacket", "Everyday casual zip-up jacket.", zackEntity.ID, sim.Link{Relation: sim.RelWorn})
 	pocket := world.SpawnSpace("jacket-pocket", "Jacket Pocket", "Small front pocket.", false)
@@ -213,13 +214,7 @@ func main() {
 		},
 		Background: "Lives in subsidized couple housing. Her ex moved out months ago, but she couldn't afford to report it. Verification is approaching, and Mia dragged Zack in as her temporary fake boyfriend.",
 	}
-	nellyAttrs := actor.NewAttributes()
-	_ = nellyAttrs.Set("mood", "Deeply flustered, overthinking every syllable, gripping hoodie sleeves")
-	_ = nellyAttrs.Set("arousal", "high")
-	_ = nellyAttrs.Set("Heart Rate", "125 bpm")
-	_ = nellyAttrs.Set("Social Battery", "12%")
-	_ = nellyAttrs.Set("Face Redness", "Maximum")
-	nellyMind := actor.New(nellyProfile, actor.WithAttributes(nellyAttrs))
+	nellyMind := actor.New(nellyProfile)
 
 	// Seed Nelly's state of mind
 	nellyMind.AddThought(actor.Thought{
@@ -251,6 +246,14 @@ func main() {
 		"A girl in her early 20s wearing an oversized gray hoodie pulled over her knuckles, hair hastily pinned back, looking equal parts mortified and determined.")
 	nellyEntity.Salience = 0.95 // Primary conversational focus
 
+	_ = nellyEntity.Attributes.Set("mood", "Deeply flustered, overthinking every syllable, gripping hoodie sleeves")
+	_ = nellyEntity.Attributes.Set("arousal", "high")
+	_ = nellyEntity.Attributes.Set("Heart Rate", "125 bpm")
+	_ = nellyEntity.Attributes.Set("Social Battery", "12%")
+	_ = nellyEntity.Attributes.Set("Face Redness", "Maximum")
+	// Private attribute hidden from EVERYONE (accessors is nil: even Nelly herself doesn't consciously realize it, known only to the Arbiter!):
+	_ = nellyEntity.Attributes.SetWithVisibility("Subconscious Panic", "Desperately terrified of having to move back into her parents' basement", sim.VisibilityPrivate, nil)
+
 	// --- MIA (Autonomous AI Character) ---
 	miaProfile := actor.Profile{
 		ID:          "mia",
@@ -262,12 +265,7 @@ func main() {
 		},
 		Background: "Close friend of both Zack and Nelly. Sees zero moral issue with roping Zack into a fake relationship to save Nelly's lease.",
 	}
-	miaAttrs := actor.NewAttributes()
-	_ = miaAttrs.Set("mood", "Cheerfully detached, hungry, highly entertained")
-	_ = miaAttrs.Set("arousal", "normal")
-	_ = miaAttrs.Set("Stress Level", "0%")
-	_ = miaAttrs.Set("Appetite", "Snack hunting")
-	miaMind := actor.New(miaProfile, actor.WithAttributes(miaAttrs))
+	miaMind := actor.New(miaProfile)
 
 	// Seed Mia's state of mind
 	miaMind.AddThought(actor.Thought{
@@ -286,6 +284,11 @@ func main() {
 	miaEntity, _ := world.SpawnActor("mia", miaMind, kitchen.ID,
 		"A chic, confident girl leaning nonchalantly against the open refrigerator door, sipping an iced tea.")
 	miaEntity.Salience = 0.75
+
+	_ = miaEntity.Attributes.Set("mood", "Cheerfully detached, hungry, highly entertained")
+	_ = miaEntity.Attributes.Set("arousal", "normal")
+	_ = miaEntity.Attributes.Set("Stress Level", "0%")
+	_ = miaEntity.Attributes.Set("Appetite", "Snack hunting")
 
 	// 5. Verification & Opening Scene Setup
 	fmt.Println("==================================================")

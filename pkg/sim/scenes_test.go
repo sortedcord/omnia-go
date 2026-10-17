@@ -279,3 +279,88 @@ func TestOrderEffectsFollowsExecutionOrder(t *testing.T) {
 		t.Fatalf("mia acted first, effects: %+v", r.Effects)
 	}
 }
+
+func TestAttributeACL(t *testing.T) {
+	attrs := NewAttributes()
+
+	// 1. Public attribute: everyone can observe, accessors cleared out
+	_ = attrs.SetWithVisibility("reputation", "Honest", VisibilityPublic, []EntityID{"zack"})
+	if attr, ok := attrs["reputation"]; !ok {
+		t.Fatal("reputation not found")
+	} else if len(attr.Accessors) != 0 {
+		t.Fatalf("public attribute must clear accessors, got %v", attr.Accessors)
+	} else if !attr.CanAccess("random-onlooker") {
+		t.Fatal("public attribute should be accessible to random onlookers")
+	}
+
+	// 2. Private attribute with whitelist accessors
+	_ = attrs.SetWithVisibility("hidden_weapon", "Knife in boot", VisibilityPrivate, []EntityID{"zack", "ally"})
+	if attr, ok := attrs["hidden_weapon"]; !ok {
+		t.Fatal("hidden_weapon not found")
+	} else {
+		if !attr.CanAccess("zack") {
+			t.Fatal("zack should have access to hidden_weapon")
+		}
+		if !attr.CanAccess("ally") {
+			t.Fatal("ally should have access to hidden_weapon")
+		}
+		if attr.CanAccess("guard") {
+			t.Fatal("guard should NOT have access to hidden_weapon")
+		}
+	}
+
+	// 3. Private attribute with EMPTY accessors: even owner cannot observe (Arbiter only!)
+	_ = attrs.SetWithVisibility("latent_infection", "Stage 2 pathogen", VisibilityPrivate, nil)
+	if attr, ok := attrs["latent_infection"]; !ok {
+		t.Fatal("latent_infection not found")
+	} else {
+		if attr.CanAccess("zack") {
+			t.Fatal("owner zack must NOT have access to private attribute with empty accessors")
+		}
+		if attr.CanAccess("doctor") {
+			t.Fatal("doctor must NOT have access to private attribute with empty accessors")
+		}
+	}
+
+	// 4. Test AccessibleTo map
+	accessible := attrs.AccessibleTo("zack")
+	if accessible["reputation"] != "Honest" {
+		t.Fatal("zack should see reputation")
+	}
+	if accessible["hidden_weapon"] != "Knife in boot" {
+		t.Fatal("zack should see hidden_weapon")
+	}
+	if _, seen := accessible["latent_infection"]; seen {
+		t.Fatal("zack must not see latent_infection")
+	}
+}
+
+func TestAttributeMutationOnProps(t *testing.T) {
+	w := offlineWorld()
+	room := w.SpawnSpace("room", "Room", "", true)
+	door, _ := w.SpawnPortal("door", "Door", room.ID, "room-2", "")
+	chair, _ := w.SpawnEntity("chair", "Wooden Chair", "A chair", room.ID, Link{Relation: RelOn})
+	sx := &Scene{ID: "scene-1", SpaceIDs: []EntityID{room.ID}}
+
+	// Arbiter sets attribute on a non-mind entity (a door portal and a chair!)
+	r := &SceneRuling{
+		Effects: []Effect{
+			{Type: EffectSetAttribute, EntityID: door.ID, Key: "material", Value: "Reinforced Titanium"},
+			{Type: EffectSetAttribute, EntityID: chair.ID, Key: "wobbly", Value: "true"},
+		},
+	}
+	mutated := map[EntityID]SceneID{}
+	w.mu.Lock()
+	w.applySceneEffectsLocked(sx, r, mutated)
+	w.mu.Unlock()
+
+	if len(r.RejectedEffects) != 0 {
+		t.Fatalf("mutations on props should succeed: %v", r.RejectedEffects)
+	}
+	if val, ok := door.Attributes.Get("material"); !ok || val != "Reinforced Titanium" {
+		t.Fatalf("door material attribute failed: %s, %v", val, ok)
+	}
+	if val, ok := chair.Attributes.Get("wobbly"); !ok || val != "true" {
+		t.Fatalf("chair wobbly attribute failed: %s, %v", val, ok)
+	}
+}

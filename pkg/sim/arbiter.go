@@ -26,16 +26,18 @@ const (
 
 // Effect is an atomic world-state mutation commanded by the Arbiter.
 type Effect struct {
-	Type      EffectType `json:"type"`
-	EntityID  EntityID   `json:"entity_id,omitempty"`
-	ParentID  EntityID   `json:"parent_id,omitempty"`
-	Relation  Relation   `json:"relation,omitempty"`
-	Placement string     `json:"placement,omitempty"`
-	Key       string     `json:"key,omitempty"`
-	Value     string     `json:"value,omitempty"`
-	Closed    *bool      `json:"closed,omitempty"`
-	Locked    *bool      `json:"locked,omitempty"`
-	Open      *bool      `json:"open,omitempty"`
+	Type       EffectType `json:"type"`
+	EntityID   EntityID   `json:"entity_id,omitempty"`
+	ParentID   EntityID   `json:"parent_id,omitempty"`
+	Relation   Relation   `json:"relation,omitempty"`
+	Placement  string     `json:"placement,omitempty"`
+	Key        string     `json:"key,omitempty"`
+	Value      string     `json:"value,omitempty"`
+	Visibility Visibility `json:"visibility,omitempty"` // "public" or "private"
+	Accessors  []EntityID `json:"accessors,omitempty"`  // Permitted observers when private
+	Closed     *bool      `json:"closed,omitempty"`
+	Locked     *bool      `json:"locked,omitempty"`
+	Open       *bool      `json:"open,omitempty"`
 }
 
 // ActorIntent packages an actor's declared intent for scene adjudication.
@@ -134,6 +136,8 @@ You MUST respond ONLY with a valid JSON object matching this schema:
       "placement": "<optional placement description>",
       "key": "<condition or attribute name>",
       "value": "<new value>",
+      "visibility": "public" | "private",
+      "accessors": ["<entity_id_1>"],
       "closed": true | false,
       "locked": true | false,
       "open": true | false
@@ -164,8 +168,8 @@ REFEREE RULES:
    - "move": Reparents entity.
    - "set_condition": Updates room condition (empty value deletes).
    - "set_portal": Sets closed/locked on portals.
-   - "set_attribute": Updates an actor's attribute (e.g. mood, arousal, Social Battery).
-   - "remove_attribute": Removes a non-core attribute.
+   - "set_attribute": Updates an attribute on ANY entity (actor, prop, vehicle, door). Set "visibility": "public" (clears accessors) or "private" with specific "accessors". An attribute with "private" and empty "accessors": [] is completely hidden from everyone (even the entity itself!), known only to you (the Arbiter) to realistically influence outcomes and alter actions!
+   - "remove_attribute": Removes a non-core attribute. Core attributes (mood, arousal) cannot be removed.
    - "set_open": Sets open=true/false on a container.
    - "reveal": Sets concealed=false.
    - NEVER invent new entity IDs. Only use IDs from the WORLD STATE.`,

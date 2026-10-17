@@ -89,8 +89,8 @@ func (s *Simulation) ComputeSpontaneity(id EntityID, tick int, event *Event) flo
 		}
 	}
 	readiness := 0.5
-	if entity.Mind != nil {
-		switch value, _ := entity.Mind.Attributes.Get("arousal"); value {
+	if entity.Attributes != nil {
+		switch value, _ := entity.Attributes.Get("arousal"); value {
 		case "low":
 			readiness = 0.2
 		case "high":

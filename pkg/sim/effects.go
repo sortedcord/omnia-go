@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"omnia.adityagupta.dev/pkg/actor"
 )
 
 // inSceneReachLocked reports whether an entity is inside one of the scene's spaces,
@@ -162,18 +160,25 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 
 		case EffectSetAttribute:
 			targetEntity, ok := s.Entities[eff.EntityID]
-			if !ok || targetEntity.Mind == nil {
-				ruling.RejectedEffects = append(ruling.RejectedEffects, fmt.Sprintf("set_attribute: %q has no mind component", eff.EntityID))
+			if !ok {
+				ruling.RejectedEffects = append(ruling.RejectedEffects, fmt.Sprintf("set_attribute: %q does not exist", eff.EntityID))
 				continue
 			}
 			if eff.Key == "" {
 				ruling.RejectedEffects = append(ruling.RejectedEffects, "set_attribute: key cannot be empty")
 				continue
 			}
-			if targetEntity.Mind.Attributes == nil {
-				targetEntity.Mind.Attributes = actor.NewAttributes()
+			if targetEntity.Attributes == nil {
+				targetEntity.Attributes = make(Attributes)
 			}
-			if err := targetEntity.Mind.Attributes.Set(eff.Key, eff.Value); err != nil {
+
+			var err error
+			if eff.Visibility != "" || eff.Accessors != nil {
+				err = targetEntity.Attributes.SetWithVisibility(eff.Key, eff.Value, eff.Visibility, eff.Accessors)
+			} else {
+				err = targetEntity.Attributes.Set(eff.Key, eff.Value)
+			}
+			if err != nil {
 				ruling.RejectedEffects = append(ruling.RejectedEffects, fmt.Sprintf("set_attribute: %v", err))
 				continue
 			}
@@ -182,11 +187,14 @@ func (s *Simulation) applySceneEffectsLocked(scene *Scene, ruling *SceneRuling, 
 
 		case EffectRemoveAttribute:
 			targetEntity, ok := s.Entities[eff.EntityID]
-			if !ok || targetEntity.Mind == nil {
-				ruling.RejectedEffects = append(ruling.RejectedEffects, fmt.Sprintf("remove_attribute: %q has no mind component", eff.EntityID))
+			if !ok {
+				ruling.RejectedEffects = append(ruling.RejectedEffects, fmt.Sprintf("remove_attribute: %q does not exist", eff.EntityID))
 				continue
 			}
-			if err := targetEntity.Mind.Attributes.Remove(eff.Key); err != nil {
+			if targetEntity.Attributes == nil {
+				continue
+			}
+			if err := targetEntity.Attributes.Remove(eff.Key); err != nil {
 				ruling.RejectedEffects = append(ruling.RejectedEffects, fmt.Sprintf("remove_attribute: %v", err))
 				continue
 			}
@@ -376,15 +384,23 @@ func (s *Simulation) renderObjectiveSpacesLocked(spaceIDs []EntityID) string {
 			}
 			if e.Mind != nil {
 				extra += " [ACTOR]"
-				// Render core attributes
-				if e.Mind.Attributes != nil {
-					var attrPairs []string
-					for k, v := range e.Mind.Attributes {
-						attrPairs = append(attrPairs, fmt.Sprintf("%s=%s", k, v.Value))
-					}
-					sort.Strings(attrPairs)
-					extra += fmt.Sprintf(" {attrs: %s}", strings.Join(attrPairs, ", "))
+			}
+			if len(e.Attributes) > 0 {
+				var attrPairs []string
+				var keys []string
+				for k := range e.Attributes {
+					keys = append(keys, k)
 				}
+				sort.Strings(keys)
+				for _, k := range keys {
+					attr := e.Attributes[k]
+					visDesc := string(attr.Visibility)
+					if attr.Visibility == VisibilityPrivate {
+						visDesc = fmt.Sprintf("private: %v", attr.Accessors)
+					}
+					attrPairs = append(attrPairs, fmt.Sprintf("%s=%s (%s)", k, attr.Value, visDesc))
+				}
+				extra += fmt.Sprintf(" {attrs: %s}", strings.Join(attrPairs, "; "))
 			}
 
 			sb.WriteString(fmt.Sprintf("%s- %s [ID: %s] (%s)%s\n", indent, e.Name, e.ID, rel, extra))

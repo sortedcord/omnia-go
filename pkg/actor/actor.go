@@ -41,13 +41,6 @@ func WithAPI(baseURL, apiKey string) Option {
 	}
 }
 
-// WithAttributes sets the initial dynamic attributes of the actor.
-func WithAttributes(attrs Attributes) Option {
-	return func(a *Actor) {
-		a.Attributes = attrs
-	}
-}
-
 // WithMemory sets the initial subjective memory bank of the actor.
 func WithMemory(memory *Memory) Option {
 	return func(a *Actor) {
@@ -72,7 +65,6 @@ func WithSystemPrompt(prompt SystemPrompt) Option {
 // Actor represents an autonomous, subjective entity in the simulation.
 type Actor struct {
 	Profile       Profile
-	Attributes    Attributes
 	Memory        *Memory
 	SystemPrompts []SystemPrompt
 
@@ -86,7 +78,6 @@ type Actor struct {
 func New(profile Profile, opts ...Option) *Actor {
 	a := &Actor{
 		Profile:         profile,
-		Attributes:      NewAttributes(),
 		Memory:          NewMemory(),
 		SystemPrompts:   DefaultSystemPrompts(profile.Name),
 		model:           "gemini-3.5-flash-lite",
@@ -206,8 +197,8 @@ func (a *Actor) buildMessages(currentStimulus SensoryEvent) []llm.Message {
 	// 1. Modular System Messages: Invariant simulation rules, cognition rules, and schema contract
 	messages = append(messages, a.buildSystemMessages()...)
 
-	// 2. Modular Developer Messages: Identity, status, and subjective memory state
-	messages = append(messages, a.buildDeveloperMessages()...)
+	// 2. Modular Developer Messages: Identity, somatic attributes, and subjective memory state
+	messages = append(messages, a.buildDeveloperMessages(currentStimulus.Attributes)...)
 
 	// 3. Subjective Turn History
 	turns := a.Memory.Turns
@@ -268,7 +259,7 @@ func (a *Actor) buildSystemMessages() []llm.Message {
 }
 
 // buildDeveloperMessages modularizes the actor's profile, dynamic state, and subjective memory.
-func (a *Actor) buildDeveloperMessages() []llm.Message {
+func (a *Actor) buildDeveloperMessages(accessibleAttributes map[string]string) []llm.Message {
 	msgs := make([]llm.Message, 0, 3)
 
 	// 1. Profile & Core Identity
@@ -295,22 +286,24 @@ When thinking, write exclusively as %s's raw, unformatted stream of consciousnes
 		Content: profileContent,
 	})
 
-	// 2. Attributes & Internal State
-	var attrKeys []string
-	for k := range a.Attributes {
-		attrKeys = append(attrKeys, k)
-	}
-	sort.Strings(attrKeys)
-	var attrLines []string
-	for _, k := range attrKeys {
-		attrLines = append(attrLines, fmt.Sprintf("  * %s: %s", k, a.Attributes[k].Value))
-	}
-	statusContent := fmt.Sprintf("CURRENT ATTRIBUTES:\n%s", strings.Join(attrLines, "\n"))
+	// 2. Attributes & Internal State (only attributes accessible to this actor)
+	if len(accessibleAttributes) > 0 {
+		var attrKeys []string
+		for k := range accessibleAttributes {
+			attrKeys = append(attrKeys, k)
+		}
+		sort.Strings(attrKeys)
+		var attrLines []string
+		for _, k := range attrKeys {
+			attrLines = append(attrLines, fmt.Sprintf("  * %s: %s", k, accessibleAttributes[k]))
+		}
+		statusContent := fmt.Sprintf("CURRENT ATTRIBUTES:\n%s", strings.Join(attrLines, "\n"))
 
-	msgs = append(msgs, llm.Message{
-		Role:    llm.Developer,
-		Content: statusContent,
-	})
+		msgs = append(msgs, llm.Message{
+			Role:    llm.Developer,
+			Content: statusContent,
+		})
+	}
 
 	return msgs
 }

@@ -50,11 +50,12 @@ type Portal struct {
 // a room, a vehicle, an actor, a piece of clothing, a pocket, or a keycard.
 // Behavior and capabilities are governed by optional component pointers.
 type Entity struct {
-	ID          EntityID `json:"id"`
-	Name        string   `json:"name"`
-	Aliases     []string `json:"aliases,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Salience    float64  `json:"salience"` // Intrinsic importance baseline (0.0 to 1.0)
+	ID          EntityID   `json:"id"`
+	Name        string     `json:"name"`
+	Aliases     []string   `json:"aliases,omitempty"`
+	Description string     `json:"description,omitempty"`
+	Salience    float64    `json:"salience"`   // Intrinsic importance baseline (0.0 to 1.0)
+	Attributes  Attributes `json:"attributes"` // Dynamic somatic, psychological, or physical attributes with ACL
 
 	// Spatial Containment Tree
 	Parent   EntityID   `json:"parent,omitempty"`
@@ -76,11 +77,12 @@ type Entity struct {
 // NewEntity creates a base entity with safe defaults.
 func NewEntity(id EntityID, name string) *Entity {
 	return &Entity{
-		ID:       id,
-		Name:     name,
-		Salience: 0.2, // standard prop baseline
-		Children: make([]EntityID, 0),
-		Revision: 1,
+		ID:         id,
+		Name:       name,
+		Salience:   0.2, // standard prop baseline
+		Attributes: make(Attributes),
+		Children:   make([]EntityID, 0),
+		Revision:   1,
 	}
 }
 
@@ -100,6 +102,23 @@ func NewSpaceEntity(id EntityID, name, description string, enterable bool) *Enti
 	return e
 }
 
+// NewActorAttributes initializes default somatic and psychological attributes for an actor.
+func NewActorAttributes(ownerID EntityID) Attributes {
+	attrs := NewAttributes()
+	_ = attrs.SetWithVisibility("mood", "Neutral", VisibilityPublic, nil)
+	_ = attrs.SetWithVisibility("arousal", "normal", VisibilityPrivate, []EntityID{ownerID})
+	if m, ok := attrs["mood"]; ok {
+		m.Core = true
+		attrs["mood"] = m
+	}
+	if a, ok := attrs["arousal"]; ok {
+		a.Core = true
+		a.Allowed = []string{"low", "normal", "high"}
+		attrs["arousal"] = a
+	}
+	return attrs
+}
+
 // NewActorEntity creates an entity housing an autonomous mind.
 // visualDescription is what onlookers physically see (not internal psychological personality).
 func NewActorEntity(id EntityID, a *actor.Actor, visualDescription string) *Entity {
@@ -113,6 +132,7 @@ func NewActorEntity(id EntityID, a *actor.Actor, visualDescription string) *Enti
 	e.Salience = 0.8 // actors have high baseline salience
 	e.Mind = a
 	e.Controller = NewLLMController()
+	e.Attributes = NewActorAttributes(id)
 	return e
 }
 
