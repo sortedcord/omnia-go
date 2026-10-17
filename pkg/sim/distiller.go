@@ -67,6 +67,29 @@ func NewLLMDistiller(client llm.Client, model string) *LLMDistiller {
 	}
 }
 
+// DistillerSchema returns the strict JSON schema for subconscious thought distillation.
+func DistillerSchema(availableLinkIDs []string) *llm.Schema {
+	linkItemSchema := llm.Str("Entity ID")
+	if len(availableLinkIDs) > 0 {
+		linkItemSchema = llm.Enum("Entity ID", availableLinkIDs...)
+	}
+
+	opItem := llm.Obj("An atomic mutation on the actor's mental graph.",
+		llm.Prop("op", llm.Enum("Mutation operator: add, update, link, unlink, set_salience, or drop.",
+			"add", "update", "link", "unlink", "set_salience", "drop")),
+		llm.Prop("id", llm.Nullable(llm.Str("Target thought ID (e.g. th-1). Required for update, link, unlink, set_salience, drop; null for add."))),
+		llm.Prop("kind", llm.Nullable(llm.Enum("Cognitive category: belief (conviction), intention (plan/goal), feeling (somatic/emotional sensation), suspicion (distrust/doubt).",
+			"belief", "intention", "feeling", "suspicion"))),
+		llm.Prop("content", llm.Nullable(llm.Str("First-person subjective thought text in character's authentic voice; null for unlink, drop."))),
+		llm.Prop("links", llm.Arr("Entity IDs linked to this thought for associative memory retrieval.", linkItemSchema)),
+		llm.Prop("salience", llm.Nullable(llm.Num("Priority score between 0.05 and 1.00 for attentional focus; null if unchanged."))),
+	)
+
+	return llm.Obj("Subconscious thought distillation ops.",
+		llm.Prop("ops", llm.Arr("List of atomic operations to update the actor's mental graph (up to 4 ops).", opItem)),
+	)
+}
+
 type distillWireResponse struct {
 	Ops []actor.ThoughtOp `json:"ops"`
 }
@@ -80,22 +103,7 @@ func (d *LLMDistiller) Distill(ctx context.Context, in DistillInput) (DistillRes
 	}
 
 	systemPrompt := fmt.Sprintf(`You are the SUBCONSCIOUS THOUGHT DISTILLER for the character "%s".
-Your role is to maintain their private, subjective thought graph (beliefs, intentions, feelings, suspicions).
-
-OUTPUT REQUIREMENT:
-You MUST respond ONLY with a valid JSON object matching this schema:
-{
-  "ops": [
-    {
-      "op": "add" | "update" | "link" | "unlink" | "set_salience" | "drop",
-      "id": "<th-ID, required for update/link/unlink/set_salience/drop>",
-      "kind": "belief" | "intention" | "feeling" | "suspicion",
-      "content": "<first-person thought prose>",
-      "links": ["<exact_entity_id_1>", "<exact_entity_id_2>"],
-      "salience": 0.75
-    }
-  ]
-}
+Your role is to maintain their private, subjective thought graph (beliefs, intentions, feelings, suspicions) according to the structured schema.
 
 DISTILLATION RULES:
 1. Strict In-World Subjectivity:
@@ -103,18 +111,11 @@ DISTILLATION RULES:
    - Filter raw stream-of-consciousness down into genuine in-character convictions, physical sensations, tactical plans, or suspicions.
    - The character's accessible private attributes reflect their conscious internal sensations and emotions (e.g. elevated heart rate, private nervousness) that naturally feed into their feelings and beliefs.
    - The character DOES NOT know if their action succeeded yet (the physics referee hasn't resolved it). Only distill what they felt, believed, and attempted.
-2. Thought Categories:
-   - "intention": A personal goal or plan (e.g. "I must reach the breaker box to save the canopy").
-   - "belief": A subjective factual conviction about reality (e.g. "The secondary greenhouse viewport is failing"). Note: beliefs can be flawed or mistaken!
-   - "suspicion": Distrust or doubt about a person, machine, or event (e.g. "DX-9 didn't short out by accident").
-   - "feeling": Somatic or emotional sensations (e.g. "My knee is throbbing terribly from the impact", "Panic is setting in").
-3. Salience & Graph Discipline:
-   - Salience is 0.05 to 1.00. Set higher salience for thoughts dominating current attention.
+2. Salience & Graph Discipline:
+   - Set higher salience (up to 1.00) for thoughts dominating immediate attention; lower for background awareness.
    - Favor updating existing thoughts or adjusting their salience over creating duplicate thoughts.
    - When an intention is completed, obsolete, or abandoned, use "drop" to forget it.
-   - Produce between 0 and 4 high-quality ops per cycle. Do not spam.
-4. Entity Linking:
-   - You may ONLY link to entity IDs explicitly provided in PERCEIVABLE ENTITIES or KNOWN ENTITIES. Never invent IDs.`,
+   - Emit between 0 and 4 high-quality ops per cycle. Do not spam.`,
 		in.ActorName)
 
 	var sb strings.Builder
@@ -150,13 +151,18 @@ DISTILLATION RULES:
 	sb.WriteString(fmt.Sprintf("ACTOR'S DECLARED INTENT:\n%q\n\n", in.Intent))
 	sb.WriteString("Distill cognitive updates into structured thought ops:")
 
+	var linkIDs []string
+	for _, p := range in.Perceivable {
+		linkIDs = append(linkIDs, string(p.ID))
+	}
+
 	req := llm.ChatRequest{
 		Model: d.model,
 		Messages: []llm.Message{
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: sb.String()},
 		},
-		ResponseFormat:   llm.JSONObject(),
+		ResponseFormat:   llm.StrictSchema("thought_distillation", "Mental graph mutations reflecting subjective experience.", DistillerSchema(linkIDs)),
 		ReasoningEffort:  llm.ReasoningLow, // Low reasoning effort is fast and concise
 		IncludeReasoning: true,
 	}
@@ -174,6 +180,22 @@ DISTILLATION RULES:
 	if err := llm.DecodeJSON(resp.Content, resp.ReasoningContent, &wire); err != nil {
 		res.Err = err
 		return res, fmt.Errorf("distiller: decode failed: %w (content: %q)", err, resp.Content)
+	}
+
+	// Post-decode enforcement: clamp salience and enforce max 4 ops
+	if len(wire.Ops) > 4 {
+		wire.Ops = wire.Ops[:4]
+	}
+	for i := range wire.Ops {
+		if wire.Ops[i].Salience != nil {
+			val := *wire.Ops[i].Salience
+			if val < 0.05 {
+				val = 0.05
+			} else if val > 1.00 {
+				val = 1.00
+			}
+			wire.Ops[i].Salience = &val
+		}
 	}
 
 	res.Ops = wire.Ops
