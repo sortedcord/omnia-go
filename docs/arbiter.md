@@ -112,10 +112,15 @@ Because the Arbiter evaluates the actor's `Status` (weariness, heart rate, adren
 * **The Referee Loop**: `Simulation.Step` passes all `act` actions to `Arbiter.Resolve`, applying validated world mutations before fanning out sensory feeds.
 * **Whitelisted Structured Effects**:
   * `move`: Reparents entities within the spatial tree, enforcing reachability and portal traversal.
-  * `set_condition`: Updates or removes environmental conditions on rooms/spaces.
+  * `set_attribute`: Sets an attribute on any entity (actor, prop, door, room). Manages visibility (`public` or `private`) and accessors. (Replaces legacy `set_condition` and `set_vital`).
+  * `remove_attribute`: Removes non-core attributes from entities.
   * `set_portal`: Adjusts `closed` and `locked` states on doors, hatches, and bulkheads.
-  * `set_vital`: Modifies an actor's internal vitals (`Oxygen Reserve`, `Heart Rate`, etc.).
   * `set_open`: Opens or closes container spaces (e.g. vehicle trunks, cabinets).
   * `reveal`: Clears concealment on uncovered or searched items.
-* **Actor Outcome Feedback**: The actor's inbox immediately receives their personal second-person sensory perception (`ActorPerception`), waking them on the following tick to observe what actually happened.
+* **Structured Outputs Contract**:
+  * The Arbiter uses OpenAI-compatible Structured Outputs (`response_format: {type: "json_schema", strict: true}`).
+  * Output shape is enforced by grammar: `execution_order` $\to$ `verdicts` (keyed by actor ID) $\to$ `resolution` $\to$ `effects` (flat nullable object with `type` enum).
+  * Entity IDs and actor IDs are constrained dynamically via schema enums directly from scene context.
+  * Prompts contain zero JSON skeletons or output boilerplate, focusing strictly on physics arbitration, simultaneity, and attribute ACL principles.
+* **Actor Outcome Feedback**: The actor's inbox immediately receives their personal second-person sensory perception synthesized by the Broadcaster, waking them on the following tick to observe what actually happened.
 * **Seeded Luck Dice Roll**: An impartial float (0.00 to 1.00) is rolled by the engine and fed to the LLM Arbiter to prevent default-success bias and make genuine mishaps possible.

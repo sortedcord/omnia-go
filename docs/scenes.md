@@ -88,6 +88,14 @@ If actors in different scenes attempt to mutate the same shared boundary entity 
 3. **Dissolution**: The bond guarantees one merged tick. It is renewed while actors on both sides keep targeting the contested entity, and dissolves on the first tick they don't.
 4. **Scope**: Only portals can be contested; each scene may only mutate entities inside its own spaces or on its boundary.
 
+### E. Structured Outputs Contracts
+All LLM components return data constrained at the sampler level via OpenAI-compatible Structured Outputs (`response_format: {type: "json_schema", strict: true}`):
+* **Actor Action**: `action_type` (enum: `speak`, `act`, `wait`), `action` (dialogue/attempt), `targets` (constrained to perceivable names when available).
+* **Arbiter Ruling**: `execution_order` (ordered IDs), `verdicts` (keyed by actor ID, guaranteeing full scene coverage), `resolution` (objective third-person ground truth), `effects` (flat nullable object with mutation enums).
+* **Broadcaster**: `perceptions` (keyed by actor ID, guaranteeing 100% coverage for all present characters).
+* **Thought Distiller**: `ops` (array of atomic operations with `op` and `kind` enums, links, and salience).
+* **Prompt Cleanliness**: Zero JSON skeletons, zero schema formatting instructions, and zero output boilerplate in system prompts. Field definitions and enum meanings are carried directly on schema property descriptions.
+
 ---
 
 ## 3. The Tick Pipeline
