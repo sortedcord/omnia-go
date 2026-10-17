@@ -232,7 +232,7 @@ REFEREE RULES:
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: sb.String()},
 		},
-		ResponseFormat:   "json_object",
+		ResponseFormat:   llm.JSONObject(),
 		ReasoningEffort:  llm.ReasoningMedium,
 		IncludeReasoning: true,
 	}

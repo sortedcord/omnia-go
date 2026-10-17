@@ -5,16 +5,12 @@ import (
 	"strings"
 )
 
-type wireResponseFormat struct {
-	Type string `json:"type"`
-}
-
 type wireRequest struct {
-	Model            string              `json:"model"`
-	Messages         []Message           `json:"messages"`
-	ResponseFormat   *wireResponseFormat `json:"response_format,omitempty"`
-	ReasoningEffort  string              `json:"reasoning_effort,omitempty"`
-	IncludeReasoning *bool               `json:"include_reasoning,omitempty"`
+	Model            string          `json:"model"`
+	Messages         []Message       `json:"messages"`
+	ResponseFormat   *ResponseFormat `json:"response_format,omitempty"`
+	ReasoningEffort  string          `json:"reasoning_effort,omitempty"`
+	IncludeReasoning *bool           `json:"include_reasoning,omitempty"`
 }
 
 type wireReasoningDetail struct {

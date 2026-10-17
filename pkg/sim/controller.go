@@ -195,7 +195,7 @@ RULES:
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: userPrompt},
 		},
-		ResponseFormat: "json_object",
+		ResponseFormat: llm.JSONObject(),
 	}
 
 	resp, err := h.client.ChatCompletion(ctx, req)

@@ -160,7 +160,7 @@ func (a *Actor) React(ctx context.Context, stimulus SensoryEvent) (*Reaction, er
 	req := llm.ChatRequest{
 		Model:            a.model,
 		Messages:         messages,
-		ResponseFormat:   "json_object",
+		ResponseFormat:   llm.JSONObject(),
 		ReasoningEffort:  a.reasoningEffort,
 		IncludeReasoning: true,
 	}

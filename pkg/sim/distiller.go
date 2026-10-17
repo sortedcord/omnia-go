@@ -156,7 +156,7 @@ DISTILLATION RULES:
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: sb.String()},
 		},
-		ResponseFormat:   "json_object",
+		ResponseFormat:   llm.JSONObject(),
 		ReasoningEffort:  llm.ReasoningLow, // Low reasoning effort is fast and concise
 		IncludeReasoning: true,
 	}

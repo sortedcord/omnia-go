@@ -40,7 +40,8 @@ func DefaultActionSchema() SystemPrompt {
 	return SystemPrompt{
 		Name: PromptActionSchema,
 		Content: `OUTPUT REQUIREMENT:
-Your final response MUST be ONLY a valid standard JSON object using double quotes (never single quotes) matching this schema:
+Your final response MUST be ONLY a valid standard JSON object (starting with '{' and ending with '}').
+Do not include thoughts, prose, or markdown outside the JSON object. All thoughts belong in your reasoning stream.
 {
   "action_type": "speak" | "act" | "wait",
   "action": "<description of what you say, what physical action you attempt, or why you wait>",

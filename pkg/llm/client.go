@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,6 +37,14 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
+// WithSchemaFallback enables or disables automatic fallback to json_object + prompt rendering
+// when a provider rejects json_schema with HTTP 400.
+func WithSchemaFallback(enable bool) Option {
+	return func(client *HTTPClient) {
+		client.enableFallback = enable
+	}
+}
+
 // DefaultClient returns a Client initialized from environment variables
 // (OMNIA_API_URL, OMNIA_API_KEY, OPENAI_BASE_URL, OPENAI_API_KEY).
 func DefaultClient() Client {
@@ -57,9 +66,12 @@ func DefaultClient() Client {
 
 // HTTPClient implements Client using standard net/http against OpenAI-compatible endpoints.
 type HTTPClient struct {
-	endpoint   string
-	apiKey     string
-	httpClient *http.Client
+	endpoint          string
+	apiKey            string
+	httpClient        *http.Client
+	fallbackMu        sync.RWMutex
+	disableJSONSchema bool
+	enableFallback    bool
 }
 
 // NewHTTPClient creates a new OpenAI-compatible Chat Completions client.
@@ -76,6 +88,7 @@ func NewHTTPClient(baseURL, apiKey string, opts ...Option) *HTTPClient {
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
+		enableFallback: true,
 	}
 
 	for _, opt := range opts {
@@ -87,27 +100,71 @@ func NewHTTPClient(baseURL, apiKey string, opts ...Option) *HTTPClient {
 
 // ChatCompletion sends a request to the chat completions API and returns the parsed result.
 func (c *HTTPClient) ChatCompletion(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	c.fallbackMu.RLock()
+	disabled := c.disableJSONSchema
+	c.fallbackMu.RUnlock()
+
+	isSchema := req.ResponseFormat != nil && req.ResponseFormat.Type == "json_schema"
+
+	if disabled && isSchema {
+		fallbackReq := c.makeFallbackRequest(req)
+		resp, _, err := c.doRoundTripWithStatus(ctx, fallbackReq)
+		return resp, err
+	}
+
+	resp, statusCode, err := c.doRoundTripWithStatus(ctx, req)
+	if err == nil {
+		return resp, nil
+	}
+
+	// D8 Fallback: if HTTP 400 on json_schema and fallback is enabled, retry once
+	if isSchema && c.enableFallback && statusCode == http.StatusBadRequest {
+		fallbackReq := c.makeFallbackRequest(req)
+		fallbackResp, _, fallbackErr := c.doRoundTripWithStatus(ctx, fallbackReq)
+		if fallbackErr == nil {
+			c.fallbackMu.Lock()
+			c.disableJSONSchema = true
+			c.fallbackMu.Unlock()
+			return fallbackResp, nil
+		}
+	}
+
+	return nil, err
+}
+
+func (c *HTTPClient) makeFallbackRequest(req ChatRequest) ChatRequest {
+	fb := req
+	fb.ResponseFormat = JSONObject()
+
+	if req.ResponseFormat != nil && req.ResponseFormat.JSONSchema != nil && req.ResponseFormat.JSONSchema.Schema != nil {
+		prompt := "EXPECTED JSON OUTPUT SCHEMA:\n" + req.ResponseFormat.JSONSchema.Schema.PromptText()
+		fb.Messages = make([]Message, len(req.Messages)+1)
+		copy(fb.Messages, req.Messages)
+		fb.Messages[len(req.Messages)] = Message{
+			Role:    System,
+			Content: prompt,
+		}
+	}
+	return fb
+}
+
+func (c *HTTPClient) doRoundTripWithStatus(ctx context.Context, req ChatRequest) (*ChatResponse, int, error) {
 	wireReq := wireRequest{
 		Model:            req.Model,
 		Messages:         req.Messages,
+		ResponseFormat:   req.ResponseFormat,
 		ReasoningEffort:  string(req.ReasoningEffort),
 		IncludeReasoning: &req.IncludeReasoning,
 	}
 
-	if req.ResponseFormat != "" {
-		wireReq.ResponseFormat = &wireResponseFormat{
-			Type: req.ResponseFormat,
-		}
-	}
-
 	payload, err := json.Marshal(wireReq)
 	if err != nil {
-		return nil, fmt.Errorf("llm: failed to marshal request: %w", err)
+		return nil, 0, fmt.Errorf("llm: failed to marshal request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewBuffer(payload))
 	if err != nil {
-		return nil, fmt.Errorf("llm: failed to create http request: %w", err)
+		return nil, 0, fmt.Errorf("llm: failed to create http request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -118,31 +175,31 @@ func (c *HTTPClient) ChatCompletion(ctx context.Context, req ChatRequest) (*Chat
 	start := time.Now()
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("llm: request failed: %w", err)
+		return nil, 0, fmt.Errorf("llm: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	duration := time.Since(start)
 	if err != nil {
-		return nil, fmt.Errorf("llm: failed to read response body: %w", err)
+		return nil, resp.StatusCode, fmt.Errorf("llm: failed to read response body: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("llm: unexpected status %s: %s", resp.Status, string(body))
+		return nil, resp.StatusCode, fmt.Errorf("llm: unexpected status %s: %s", resp.Status, string(body))
 	}
 
 	var wireResp wireResponse
 	if err := json.Unmarshal(body, &wireResp); err != nil {
-		return nil, fmt.Errorf("llm: failed to decode response JSON: %w", err)
+		return nil, resp.StatusCode, fmt.Errorf("llm: failed to decode response JSON: %w", err)
 	}
 
 	if wireResp.Error != nil {
-		return nil, fmt.Errorf("llm: API returned error: %s (type: %s)", wireResp.Error.Message, wireResp.Error.Type)
+		return nil, resp.StatusCode, fmt.Errorf("llm: API returned error: %s (type: %s)", wireResp.Error.Message, wireResp.Error.Type)
 	}
 
 	if len(wireResp.Choices) == 0 {
-		return nil, fmt.Errorf("llm: received empty choices in response: %s", string(body))
+		return nil, resp.StatusCode, fmt.Errorf("llm: received empty choices in response: %s", string(body))
 	}
 
 	choice := wireResp.Choices[0]
@@ -159,7 +216,7 @@ func (c *HTTPClient) ChatCompletion(ctx context.Context, req ChatRequest) (*Chat
 			TotalTokens:      wireResp.Usage.TotalTokens,
 		},
 		Duration: duration,
-	}, nil
+	}, resp.StatusCode, nil
 }
 
 // cleanCodeFences strips optional markdown ``` or ```json wrappers.
