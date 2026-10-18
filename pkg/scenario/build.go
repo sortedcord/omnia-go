@@ -467,7 +467,7 @@ func Build(doc *spec.Document, opts BuildOptions) (*Instance, error) {
 				})
 			}
 			for _, retID := range startMindOv.RetractClaimIDs {
-				_ = retID // Reserved for claim retraction
+				actorMind.RetractClaim(retID)
 			}
 		}
 
@@ -574,9 +574,11 @@ func Build(doc *spec.Document, opts BuildOptions) (*Instance, error) {
 			placement = resE.Link.Placement
 			concealed = resE.Link.Concealed
 		}
-		_ = world.Move(sim.EntityID(resE.ID), sim.EntityID(resE.ParentID), sim.Link{
+		if err := world.Move(sim.EntityID(resE.ID), sim.EntityID(resE.ParentID), sim.Link{
 			Relation: rel, Placement: placement, Concealed: concealed,
-		})
+		}); err != nil {
+			return nil, fmt.Errorf("build: failed moving container space %q to parent %q: %w", resE.ID, resE.ParentID, err)
+		}
 	}
 
 	// 7. Wire Player and Controller
@@ -588,7 +590,9 @@ func Build(doc *spec.Document, opts BuildOptions) (*Instance, error) {
 	var humanCtrl *sim.HumanController
 	if opts.Interactive && playerID != "" {
 		humanCtrl = sim.NewHumanController(nil, model)
-		_ = world.SetController(sim.EntityID(playerID), humanCtrl)
+		if err := world.SetController(sim.EntityID(playerID), humanCtrl); err != nil {
+			return nil, fmt.Errorf("build: failed setting controller on player %q: %w", playerID, err)
+		}
 	}
 
 	// 8. Schedule Events

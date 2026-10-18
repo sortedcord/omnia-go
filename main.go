@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,12 +124,18 @@ func main() {
 			coStarNames = append(coStarNames, a.Profile.Name)
 		}
 	}
+	slices.Sort(coStarNames)
+
+	playerName := string(inst.Player)
+	if act, ok := inst.Actors[inst.Player]; ok && act.Profile.Name != "" {
+		playerName = fmt.Sprintf("%s (%s)", act.Profile.Name, inst.Player)
+	}
 
 	fmt.Println("==================================================")
 	fmt.Printf("   SCENARIO: %s\n", strings.ToUpper(inst.Doc.Meta.Title))
 	fmt.Println("==================================================")
 	fmt.Printf("Setting:   %s\n", playerLocName)
-	fmt.Printf("Player:    %s\n", inst.Player)
+	fmt.Printf("Player:    %s\n", playerName)
 	fmt.Printf("Co-Stars:  %s\n", strings.Join(coStarNames, ", "))
 	fmt.Printf("Clock:     %s\n", inst.World.Clock)
 
@@ -237,13 +244,24 @@ func main() {
 
 	// 8. Final Dossiers & Mind State
 	fmt.Println("\n==================================================")
-	fmt.Println("           NELLY'S EVOLVED DOSSIERS & CLAIMS      ")
+	fmt.Println("              EVOLVED DOSSIERS & MIND STATE       ")
 	fmt.Println("==================================================")
-	if nellyActor, ok := inst.Actors["nelly"]; ok && nellyActor.Mind != nil {
-		for _, d := range nellyActor.Mind.DossiersSnapshot() {
+	var actorOrder []sim.EntityID
+	for aID := range inst.Actors {
+		actorOrder = append(actorOrder, aID)
+	}
+	slices.Sort(actorOrder)
+
+	for _, aID := range actorOrder {
+		act := inst.Actors[aID]
+		if act.Mind == nil {
+			continue
+		}
+		fmt.Printf("\n>>> %s (%s) <<<\n", act.Profile.Name, aID)
+		for _, d := range act.Mind.DossiersSnapshot() {
 			if len(d.Claims) > 0 || d.Impression != "" {
 				subjName := d.SubjectID
-				if s, ok := nellyActor.Mind.GetSubject(d.SubjectID); ok && len(s.Names) > 0 {
+				if s, ok := act.Mind.GetSubject(d.SubjectID); ok && len(s.Names) > 0 {
 					subjName = s.Names[0]
 				}
 				fmt.Printf("\n[Subject: %s (%s)]\n", subjName, d.SubjectID)

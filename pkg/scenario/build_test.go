@@ -1,9 +1,11 @@
 package scenario
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"omnia.adityagupta.dev/pkg/llm"
 	"omnia.adityagupta.dev/pkg/memory"
 	"omnia.adityagupta.dev/pkg/scenario/spec"
 )
@@ -87,6 +89,40 @@ func TestBuildSimulationInstance(t *testing.T) {
 	if inst.Player != "actor-a" {
 		t.Fatalf("expected player entity to be actor-a, got %s", inst.Player)
 	}
+}
+
+func TestBuildRetractClaims(t *testing.T) {
+	doc := validTestDocument()
+	doc.Starts[0].Minds = []spec.MindOverride{
+		{
+			OwnerID:         "alice",
+			RetractClaimIDs: []string{"c-alice-1"},
+		},
+	}
+
+	inst, err := Build(&doc, BuildOptions{
+		Client: &fakeClient{},
+	})
+	if err != nil {
+		t.Fatalf("expected build to succeed: %v", err)
+	}
+
+	doss, ok := inst.Actors["actor-a"].Mind.GetDossier("bob")
+	if !ok {
+		t.Fatalf("missing bob dossier")
+	}
+	if len(doss.Claims) != 0 {
+		t.Fatalf("expected claim c-alice-1 to be retracted, but %d active claims remain", len(doss.Claims))
+	}
+	if len(doss.ArchivedClaims) != 1 {
+		t.Fatalf("expected retracted claim to be in ArchivedClaims, got %d", len(doss.ArchivedClaims))
+	}
+}
+
+type fakeClient struct{}
+
+func (f *fakeClient) ChatCompletion(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	return &llm.ChatResponse{}, nil
 }
 
 func specEntity(id, kind, name, parentID string, sp *spec.SpaceBlock) spec.Entity {

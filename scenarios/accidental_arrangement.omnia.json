@@ -32,10 +32,34 @@
       "directives": [
         "Figure out what Mia and Nelly actually expect you to do before agreeing to anything crazy",
         "React naturally to Nelly's awkwardness without making her completely combust",
-        "Protect your dignity—do not let anyone treat you like a charity case"
+        "Protect your dignity\u2014do not let anyone treat you like a charity case"
       ],
       "background": "Fourth-year architecture student. After his roommates moved out with their partners, he lost his lease and spent months couch-surfing, sleeping in internet cafes, and occasionally freezing on park benches. He does not know Nelly prior to Mia dragging him into Apt 3B.",
-      "born_at": "2004-03-21T00:00:00Z"
+      "born_at": "2004-03-21T00:00:00Z",
+      "likes": [
+        {
+          "item": "structural architecture",
+          "reason": "appreciates clean lines, structural honesty, and physical permanence"
+        },
+        {
+          "item": "cheap black coffee",
+          "reason": "keeps him functional on four hours of fractured sleep"
+        },
+        {
+          "item": "quiet corners with power outlets",
+          "reason": "essential for keeping his drafting laptop running overnight"
+        }
+      ],
+      "dislikes": [
+        {
+          "item": "charity and pity",
+          "reason": "refuses to feel like a burden to friends or acquaintances"
+        },
+        {
+          "item": "administrative lecturing",
+          "reason": "recalls his public embarrassment in structural dynamics"
+        }
+      ]
     },
     {
       "id": "nelly",
@@ -50,7 +74,27 @@
         "Figure out if Zack can be trusted or if he thinks you're completely insane"
       ],
       "background": "Lives in subsidized couple housing (Apt 3B). Her ex David walked out six weeks ago. The housing board scheduled a mandatory in-person audit for Thursday. Mia dragged Zack in as a stand-in boyfriend.",
-      "born_at": "2004-08-14T00:00:00Z"
+      "born_at": "2004-08-14T00:00:00Z",
+      "likes": [
+        {
+          "item": "color-coded index cards",
+          "reason": "provides structure and a sense of control under extreme panic"
+        },
+        {
+          "item": "lavender tea",
+          "reason": "soothes her racing pulse and social anxiety"
+        }
+      ],
+      "dislikes": [
+        {
+          "item": "unannounced inspections",
+          "reason": "triggers terror of lease revocation and back-rent charges"
+        },
+        {
+          "item": "parental interrogation",
+          "reason": "dreads moving back into her parents' basement in disgrace"
+        }
+      ]
     },
     {
       "id": "mia",
@@ -66,7 +110,23 @@
         "Enjoy the awkward entertainment while raiding Nelly's fridge"
       ],
       "background": "Close friend of both Zack and Nelly (who didn't know each other). Discovered Zack sleeping in a laundromat and Nelly crying on her kitchen floor, and engineered this arrangement as the ultimate pragmatic win-win.",
-      "born_at": "2004-05-02T00:00:00Z"
+      "born_at": "2004-05-02T00:00:00Z",
+      "likes": [
+        {
+          "item": "logistical problem-solving",
+          "reason": "loves cutting through red tape and stubborn pride to fix people's lives"
+        },
+        {
+          "item": "iced tea and gourmet snacks",
+          "reason": "the ideal fuel for watching high-stakes social comedy"
+        }
+      ],
+      "dislikes": [
+        {
+          "item": "passive martyrdom",
+          "reason": "cannot stand watching friends suffer in silence out of foolish pride"
+        }
+      ]
     }
   ],
   "entities": [
@@ -90,7 +150,7 @@
     {
       "id": "architecture-studio",
       "kind": "space",
-      "name": "Architecture \u0026 Design Studio 4B",
+      "name": "Architecture & Design Studio 4B",
       "description": "A high-ceilinged loft studio with tall industrial windows, rows of wooden drafting tables, and scattered cardboard models.",
       "salience": 0.5,
       "attributes": [
@@ -663,7 +723,7 @@
     {
       "id": "housing-quad",
       "kind": "space",
-      "name": "Bryn Hall Courtyard \u0026 Quad",
+      "name": "Bryn Hall Courtyard & Quad",
       "description": "A grassy square between university housing blocks with paved walkways, mature maple trees, and green-painted park benches.",
       "salience": 0.5,
       "attributes": [
@@ -906,7 +966,7 @@
     {
       "id": "mailroom-lobby",
       "kind": "space",
-      "name": "Ground Floor Mailroom \u0026 Lobby",
+      "name": "Ground Floor Mailroom & Lobby",
       "description": "A fluorescent-lit lobby lined with rows of dented brass mailboxes and a bulletin board covered in administrative notices.",
       "salience": 0.5,
       "space": {
@@ -1429,7 +1489,7 @@
     {
       "id": "stairwell-3f",
       "kind": "space",
-      "name": "3rd Floor Stairwell \u0026 Elevator Landing",
+      "name": "3rd Floor Stairwell & Elevator Landing",
       "description": "A painted cinderblock stairwell echoing with distant footsteps and the hum of an old hydraulic elevator.",
       "salience": 0.5,
       "space": {
@@ -1561,7 +1621,14 @@
           "names": [
             "CyberNet - Booth 14"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "cybernet-booth-14",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "cybernet-cafe",
@@ -1569,7 +1636,14 @@
           "names": [
             "24-Hour 'CyberNet' Internet Cafe"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "cybernet-cafe",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "daily-grind-cafe",
@@ -1577,7 +1651,14 @@
           "names": [
             "The Daily Grind Coffee Kiosk"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "daily-grind-cafe",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "hotel-starlet-room",
@@ -1585,15 +1666,29 @@
           "names": [
             "Hotel Starlet - Room 204"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "hotel-starlet-room",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "housing-quad",
           "kind": "place",
           "names": [
-            "Bryn Hall Courtyard \u0026 Quad"
+            "Bryn Hall Courtyard & Quad"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "housing-quad",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "lecture-hall-c",
@@ -1601,7 +1696,14 @@
           "names": [
             "Engineering Hall - Lecture Hall C"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "lecture-hall-c",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "mia",
@@ -1661,33 +1763,40 @@
             "myself",
             "zack"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "zack",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         }
       ],
       "dossiers": [
         {
           "subject_id": "cybernet-booth-14",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "cybernet-cafe",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "daily-grind-cafe",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "hotel-starlet-room",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "housing-quad",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "lecture-hall-c",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "mia",
@@ -1741,7 +1850,7 @@
         },
         {
           "subject_id": "old-shared-apartment",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "professor-harrison",
@@ -1762,13 +1871,6 @@
         {
           "subject_id": "zack",
           "claims": [
-            {
-              "id": "c-zk-self-1",
-              "kind": "intention",
-              "content": "Find out why Mia dragged me all the way across campus to married student housing.",
-              "salience": 0.95,
-              "conviction": 0.85
-            },
             {
               "id": "c-zk-self-2",
               "kind": "feeling",
@@ -1791,13 +1893,6 @@
               "evidence": [
                 "ep-zack-couch-surfing"
               ]
-            },
-            {
-              "id": "c-zk-self-4",
-              "kind": "intention",
-              "content": "See what Mia is grinning about before I commit to anything.",
-              "salience": 0.85,
-              "conviction": 0.8
             }
           ]
         }
@@ -1985,12 +2080,12 @@
             "old-shared-apartment"
           ],
           "title": "Watching My Last Roommate Move Out and Giving Up the Flat",
-          "summary": "My last remaining roommate, Leo, packed his moving truck with his fiancée, leaving me standing in an echoing, empty apartment on Maple Street with an unaffordable $2,100 lease renewal notice on the counter. With my student research stipend paying barely $750 a month, there was no math that worked. I packed everything I owned into two nylon duffels and a backpack, turned in my keys to the property manager, and stepped out onto the sidewalk homeless.",
+          "summary": "My last remaining roommate, Leo, packed his moving truck with his fianc\u00e9e, leaving me standing in an echoing, empty apartment on Maple Street with an unaffordable $2,100 lease renewal notice on the counter. With my student research stipend paying barely $750 a month, there was no math that worked. I packed everything I owned into two nylon duffels and a backpack, turned in my keys to the property manager, and stepped out onto the sidewalk homeless.",
           "tone": "grim and quietly desperate",
           "importance": 0.9,
           "beats": [
             {
-              "text": "I stood in the bare living room of our old Maple Street flat, listening to the echoes as Leo shut the tailgate of his U-Haul truck and drove away with his fiancée.",
+              "text": "I stood in the bare living room of our old Maple Street flat, listening to the echoes as Leo shut the tailgate of his U-Haul truck and drove away with his fianc\u00e9e.",
               "subject_ids": [
                 "old-shared-apartment"
               ]
@@ -2020,7 +2115,14 @@
           "names": [
             "Small Balcony"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "balcony",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "coffee-table",
@@ -2028,7 +2130,14 @@
           "names": [
             "Low Wooden Coffee Table"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "coffee-table",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "david",
@@ -2045,7 +2154,14 @@
           "names": [
             "Apartment Hallway"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "hallway",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "housing-authority",
@@ -2061,9 +2177,16 @@
           "id": "housing-quad",
           "kind": "place",
           "names": [
-            "Bryn Hall Courtyard \u0026 Quad"
+            "Bryn Hall Courtyard & Quad"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "housing-quad",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "kitchenette",
@@ -2071,7 +2194,14 @@
           "names": [
             "Open Kitchenette"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "kitchenette",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "lavender-pot",
@@ -2079,7 +2209,14 @@
           "names": [
             "Half-Wilted Potted Lavender"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "lavender-pot",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "living-room",
@@ -2087,15 +2224,29 @@
           "names": [
             "Nelly's Apartment - Living Room"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "living-room",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "mailroom-lobby",
           "kind": "place",
           "names": [
-            "Ground Floor Mailroom \u0026 Lobby"
+            "Ground Floor Mailroom & Lobby"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "mailroom-lobby",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "mia",
@@ -2121,7 +2272,14 @@
             "myself",
             "nelly"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "nelly",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "nellys-parents",
@@ -2153,7 +2311,7 @@
       "dossiers": [
         {
           "subject_id": "balcony",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "david",
@@ -2194,7 +2352,7 @@
         },
         {
           "subject_id": "hallway",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "housing-authority",
@@ -2214,19 +2372,19 @@
         },
         {
           "subject_id": "housing-quad",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "kitchenette",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "living-room",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "mailroom-lobby",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "mia",
@@ -2254,20 +2412,6 @@
         {
           "subject_id": "nelly",
           "claims": [
-            {
-              "id": "c-nel-self-1",
-              "kind": "intention",
-              "content": "Try not to faint or sound completely insane when Mia brings this guy inside.",
-              "salience": 0.95,
-              "conviction": 0.85
-            },
-            {
-              "id": "c-nel-self-2",
-              "kind": "feeling",
-              "content": "My heart is hammering at 125 bpm listening to footsteps and muffled voices outside the door.",
-              "salience": 0.88,
-              "conviction": 0.9
-            },
             {
               "id": "c-nel-self-3",
               "kind": "feeling",
@@ -2578,7 +2722,14 @@
           "names": [
             "The Daily Grind Coffee Kiosk"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "daily-grind-cafe",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "david",
@@ -2595,7 +2746,14 @@
           "names": [
             "East Side 24-Hour Laundromat"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "eastside-laundromat",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "housing-authority",
@@ -2611,7 +2769,14 @@
           "names": [
             "Open Kitchenette"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "kitchenette",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "living-room",
@@ -2619,7 +2784,14 @@
           "names": [
             "Nelly's Apartment - Living Room"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "living-room",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "mia",
@@ -2629,7 +2801,14 @@
             "myself",
             "mia"
           ],
-          "origin": "authored"
+          "origin": "authored",
+          "bindings": [
+            {
+              "entity_id": "mia",
+              "mode": "identity",
+              "confidence": 1.0
+            }
+          ]
         },
         {
           "id": "nelly",
@@ -2680,29 +2859,19 @@
         },
         {
           "subject_id": "eastside-laundromat",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "kitchenette",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "living-room",
-          "claims": null
+          "claims": []
         },
         {
           "subject_id": "mia",
           "claims": [
-            {
-              "id": "c-mia-self-1",
-              "kind": "intention",
-              "content": "Now that Zack is here, pitch him the arrangement before he has a chance to turn around.",
-              "salience": 0.95,
-              "conviction": 0.9,
-              "evidence": [
-                "ep-mia-the-masterplan"
-              ]
-            },
             {
               "id": "c-mia-self-2",
               "kind": "belief",
@@ -2805,7 +2974,7 @@
             "living-room"
           ],
           "title": "Hatching the Ultimate Pragmatic Win-Win",
-          "summary": "Drinking morning matcha in my room, the entire puzzle clicked into place with absolute perfection. Nelly has a subsidized two-person apartment with an empty room and an inspection audit looming. Zack has nowhere to sleep, is freezing on benches, and is too proud to ask for charity. If Zack plays the doting live-in boyfriend for the housing inspector, Nelly keeps her subsidized home and Zack gets a real bed, a hot shower, and a roof over his head. It's the most elegant, bulletproof win-win in human history—if I can keep them from dying of embarrassment first.",
+          "summary": "Drinking morning matcha in my room, the entire puzzle clicked into place with absolute perfection. Nelly has a subsidized two-person apartment with an empty room and an inspection audit looming. Zack has nowhere to sleep, is freezing on benches, and is too proud to ask for charity. If Zack plays the doting live-in boyfriend for the housing inspector, Nelly keeps her subsidized home and Zack gets a real bed, a hot shower, and a roof over his head. It's the most elegant, bulletproof win-win in human history\u2014if I can keep them from dying of embarrassment first.",
           "tone": "gleeful tactical triumph",
           "importance": 0.96,
           "beats": [
@@ -2890,7 +3059,89 @@
           "location_id": "breezeway-3f",
           "text": "You climb the concrete stairs to the third floor of Bryn Hall, following the frantic address Mia texted you twenty minutes ago. Stepping out onto the open-air breezeway, you see Mia standing outside the door to Apartment 3B, leaning against the metal railing with an iced tea. As your shoes scuff against the concrete, she turns her head, spots you, and a knowing, triumphant grin spreads across her face."
         }
+      ],
+      "minds": [
+        {
+          "owner_id": "zack",
+          "upsert_claims": [
+            {
+              "subject_id": "zack",
+              "claim": {
+                "id": "c-zk-self-1",
+                "kind": "intention",
+                "content": "Find out why Mia dragged me all the way across campus to married student housing.",
+                "salience": 0.95,
+                "conviction": 0.85
+              }
+            },
+            {
+              "subject_id": "zack",
+              "claim": {
+                "id": "c-zk-self-4",
+                "kind": "intention",
+                "content": "See what Mia is grinning about before I commit to anything.",
+                "salience": 0.85,
+                "conviction": 0.8
+              }
+            }
+          ]
+        },
+        {
+          "owner_id": "nelly",
+          "upsert_claims": [
+            {
+              "subject_id": "nelly",
+              "claim": {
+                "id": "c-nel-self-1",
+                "kind": "intention",
+                "content": "Try not to faint or sound completely insane when Mia brings this guy inside.",
+                "salience": 0.95,
+                "conviction": 0.85
+              }
+            },
+            {
+              "subject_id": "nelly",
+              "claim": {
+                "id": "c-nel-self-2",
+                "kind": "feeling",
+                "content": "My heart is hammering at 125 bpm listening to footsteps and muffled voices outside the door.",
+                "salience": 0.88,
+                "conviction": 0.9
+              }
+            }
+          ]
+        },
+        {
+          "owner_id": "mia",
+          "upsert_claims": [
+            {
+              "subject_id": "mia",
+              "claim": {
+                "id": "c-mia-self-1",
+                "kind": "intention",
+                "content": "Now that Zack is here, pitch him the arrangement before he has a chance to turn around.",
+                "salience": 0.95,
+                "conviction": 0.9,
+                "evidence": [
+                  "ep-mia-the-masterplan"
+                ]
+              }
+            }
+          ]
+        }
       ]
+    }
+  ],
+  "history": [
+    {
+      "id": "h-housing-notice-sent",
+      "occurred_at": "2026-10-12T10:00:00Z",
+      "precision": "day",
+      "location_id": "mailroom-lobby",
+      "participant_ids": [
+        "nelly"
+      ],
+      "summary": "University housing compliance generated the formal random audit summons for Apartment 3B."
     }
   ]
 }

@@ -207,6 +207,84 @@ func TestValidateNoTick1EventRejected(t *testing.T) {
 	}
 }
 
+func TestValidateEnumsRejected(t *testing.T) {
+	doc := validTestDocument()
+	doc.Entities = append(doc.Entities, spec.Entity{ID: "x1", Kind: "spcae", Name: "typo", ParentID: "room-a"})
+	doc.Entities[1].Link.Relation = "inside"
+	doc.Minds[0].Dossiers[0].Claims[0].Kind = "opinion"
+	doc.Minds[0].Subjects[0].Bindings[0].Mode = "maybe"
+	doc.Minds[0].Episodes[0].Precision = "week"
+
+	rep := Validate(&doc, "")
+	if rep.Valid {
+		t.Fatalf("expected validation failure on invalid enums")
+	}
+
+	foundKind, foundRel, foundClaim, foundMode, foundPrec := false, false, false, false, false
+	for _, iss := range rep.Issues {
+		if iss.Code == "INVALID_ENUM" {
+			switch iss.Pointer {
+			case "/entities/2/kind":
+				foundKind = true
+			case "/entities/1/link/relation":
+				foundRel = true
+			case "/minds/0/dossiers/0/claims/0/kind":
+				foundClaim = true
+			case "/minds/0/subjects/0/bindings/0/mode":
+				foundMode = true
+			case "/minds/0/episodes/0/precision":
+				foundPrec = true
+			}
+		}
+	}
+	if !foundKind || !foundRel || !foundClaim || !foundMode || !foundPrec {
+		t.Fatalf("missing expected enum validation error: kind=%v rel=%v claim=%v mode=%v prec=%v",
+			foundKind, foundRel, foundClaim, foundMode, foundPrec)
+	}
+}
+
+func TestValidateStartClosureAndOverrides(t *testing.T) {
+	doc := validTestDocument()
+	doc.Starts[0].PresentIDs = []string{"actor-a"} // missing parent room-a
+	doc.Starts[0].Overrides = []spec.EntityOverride{{EntityID: "ghost"}}
+	doc.Starts[0].Minds = []spec.MindOverride{{OwnerID: "nobody", RetractClaimIDs: []string{"c-none"}}}
+
+	rep := Validate(&doc, "start-opening")
+	if rep.Valid {
+		t.Fatalf("expected validation failure on bad start closure and overrides")
+	}
+
+	foundClosure, foundOverride, foundOwner := false, false, false
+	for _, iss := range rep.Issues {
+		if iss.Code == "MISSING_ANCESTOR_IN_PRESENT" {
+			foundClosure = true
+		}
+		if iss.Code == "UNKNOWN_OVERRIDE_TARGET" {
+			foundOverride = true
+		}
+		if iss.Code == "UNKNOWN_MIND_OWNER" {
+			foundOwner = true
+		}
+	}
+	if !foundClosure || !foundOverride || !foundOwner {
+		t.Fatalf("missing expected start validation error: closure=%v override=%v owner=%v",
+			foundClosure, foundOverride, foundOwner)
+	}
+
+	// Validate with non-existent start
+	repUnknown := Validate(&doc, "does-not-exist")
+	foundUnknownStart := false
+	for _, iss := range repUnknown.Issues {
+		if iss.Code == "START_NOT_FOUND" {
+			foundUnknownStart = true
+			break
+		}
+	}
+	if !foundUnknownStart {
+		t.Fatalf("expected START_NOT_FOUND error")
+	}
+}
+
 func TestNoScenarioSpecificContentInPackageScenario(t *testing.T) {
 	files, err := os.ReadDir(".")
 	if err != nil {

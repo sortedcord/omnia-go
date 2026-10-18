@@ -558,6 +558,31 @@ func (m *Mind) AddClaim(subjectID string, c Claim) {
 	d.Claims = append(d.Claims, c)
 }
 
+// RetractClaim searches all dossiers in this mind and retracts the specified claim.
+func (m *Mind) RetractClaim(claimID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, d := range m.dossiers {
+		for i, c := range d.Claims {
+			if c.ID == claimID {
+				if c.Fixed {
+					return false
+				}
+				c.History = append(c.History, Revision{
+					Content: c.Content,
+					Tick:    1,
+				})
+				d.ArchivedClaims = append(d.ArchivedClaims, c)
+				d.Claims = append(d.Claims[:i], d.Claims[i+1:]...)
+				d.Updated = 1
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // AddEpisode seeds an authored episode directly into the archive.
 func (m *Mind) AddEpisode(ep *Episode) {
 	m.mu.Lock()

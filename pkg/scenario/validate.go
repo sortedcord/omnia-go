@@ -32,9 +32,21 @@ type Issue struct {
 
 // ValidationReport contains all issues discovered during semantic inspection.
 type ValidationReport struct {
-	Valid  bool    `json:"valid"`
-	Issues []Issue `json:"issues"`
+	Valid                bool     `json:"valid"`
+	Issues               []Issue  `json:"issues"`
+	ActorsReachedOnTick1 []string `json:"actors_reached_on_tick_1,omitempty"`
 }
+
+var (
+	validEntityKinds    = []string{"space", "item", "portal", "actor"}
+	validRelations      = []string{"in", "on", "under", "behind", "worn", "held", "seated", "contained"}
+	validClaimKinds     = []string{"belief", "feeling", "suspicion", "intention"}
+	validSubjectKinds   = []string{"person", "place", "object", "group", "idea"}
+	validSubjectOrigins = []string{"authored", "perceived"}
+	validBindingModes   = []string{"identity", "anchor"}
+	validPrecisions     = []string{"minute", "hour", "day", "month", "year", ""}
+	validVisibilities   = []string{"public", "private", ""}
+)
 
 // Validate inspects a decoded scenario Document against all semantic and architectural constraints.
 func Validate(doc *spec.Document, startID string) ValidationReport {
@@ -104,6 +116,13 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 		}
 		entityMap[e.ID] = e
 
+		if !slices.Contains(validEntityKinds, e.Kind) {
+			add(ptr+"/kind", e.ID, SeverityError, "INVALID_ENUM", fmt.Sprintf("invalid entity kind %q; allowed: %v", e.Kind, validEntityKinds))
+		}
+		if e.Link != nil && !slices.Contains(validRelations, e.Link.Relation) {
+			add(ptr+"/link/relation", e.ID, SeverityError, "INVALID_ENUM", fmt.Sprintf("invalid relation %q; allowed: %v", e.Link.Relation, validRelations))
+		}
+
 		if e.Salience < 0 || e.Salience > 1.0 {
 			add(ptr+"/salience", e.ID, SeverityError, "OUT_OF_RANGE", "entity salience must be within [0.0, 1.0]")
 		}
@@ -138,6 +157,9 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 				add(aPtr+"/key", e.ID, SeverityError, "DUPLICATE_KEY", fmt.Sprintf("duplicate attribute key %q on entity", attr.Key))
 			}
 			seenKeys[attr.Key] = true
+			if attr.Visibility != "" && !slices.Contains(validVisibilities, attr.Visibility) {
+				add(aPtr+"/visibility", e.ID, SeverityError, "INVALID_ENUM", fmt.Sprintf("invalid visibility %q", attr.Visibility))
+			}
 			if len(attr.Allowed) > 0 && !slices.Contains(attr.Allowed, attr.Value) {
 				add(aPtr+"/value", e.ID, SeverityError, "INVALID_VALUE", fmt.Sprintf("attribute value %q not in allowed enum %v", attr.Value, attr.Allowed))
 			}
@@ -235,6 +257,12 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 			} else if !slugRegex.MatchString(s.ID) {
 				add(sPtr+"/id", s.ID, SeverityError, "INVALID_SLUG", fmt.Sprintf("subject id %q must be a slug", s.ID))
 			}
+			if !slices.Contains(validSubjectKinds, s.Kind) {
+				add(sPtr+"/kind", s.ID, SeverityError, "INVALID_ENUM", fmt.Sprintf("invalid subject kind %q; allowed: %v", s.Kind, validSubjectKinds))
+			}
+			if !slices.Contains(validSubjectOrigins, s.Origin) {
+				add(sPtr+"/origin", s.ID, SeverityError, "INVALID_ENUM", fmt.Sprintf("invalid subject origin %q; allowed: %v", s.Origin, validSubjectOrigins))
+			}
 			if mindSubjectIDs[s.ID] {
 				add(sPtr+"/id", s.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate subject ID %q in mind of %s", s.ID, m.OwnerID))
 			}
@@ -244,6 +272,9 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 			// Binding checks (syntax only - I2)
 			for k, b := range s.Bindings {
 				bPtr := fmt.Sprintf("%s/bindings/%d", sPtr, k)
+				if !slices.Contains(validBindingModes, b.Mode) {
+					add(bPtr+"/mode", s.ID, SeverityError, "INVALID_ENUM", fmt.Sprintf("invalid binding mode %q; allowed: %v", b.Mode, validBindingModes))
+				}
 				if b.Confidence < 0 || b.Confidence > 1.0 {
 					add(bPtr+"/confidence", s.ID, SeverityError, "OUT_OF_RANGE", "binding confidence must be in [0.0, 1.0]")
 				}
@@ -263,6 +294,9 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 				add(ePtr+"/id", "", SeverityError, "MISSING_ID", "episode id cannot be empty")
 			} else if !slugRegex.MatchString(ep.ID) {
 				add(ePtr+"/id", ep.ID, SeverityError, "INVALID_SLUG", fmt.Sprintf("episode id %q must be a slug", ep.ID))
+			}
+			if !slices.Contains(validPrecisions, ep.Precision) {
+				add(ePtr+"/precision", ep.ID, SeverityError, "INVALID_ENUM", fmt.Sprintf("invalid precision %q; allowed: %v", ep.Precision, validPrecisions))
 			}
 			if mindEpisodeIDs[ep.ID] {
 				add(ePtr+"/id", ep.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate episode ID %q in mind of %s", ep.ID, m.OwnerID))
@@ -331,6 +365,9 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 				} else if !slugRegex.MatchString(c.ID) {
 					add(cPtr+"/id", c.ID, SeverityError, "INVALID_SLUG", fmt.Sprintf("claim id %q must be a slug", c.ID))
 				}
+				if !slices.Contains(validClaimKinds, c.Kind) {
+					add(cPtr+"/kind", c.ID, SeverityError, "INVALID_ENUM", fmt.Sprintf("invalid claim kind %q; allowed: %v", c.Kind, validClaimKinds))
+				}
 				if c.Salience < 0.05 || c.Salience > 1.0 {
 					add(cPtr+"/salience", c.ID, SeverityError, "OUT_OF_RANGE", "claim salience must be within [0.05, 1.0]")
 				}
@@ -351,8 +388,26 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 		add("/starts", "", SeverityError, "NO_STARTS", "scenario must define at least one starting point")
 	}
 
+	// Map actor entities to their immediate enterable spaces
+	actorSpaceMap := make(map[string]string)
+	for _, e := range doc.Entities {
+		if e.Kind == "actor" {
+			curr := e.ParentID
+			for curr != "" {
+				p := entityMap[curr]
+				if p.Kind == "space" && p.Space != nil && p.Space.Enterable {
+					actorSpaceMap[e.ID] = p.ID
+					break
+				}
+				curr = p.ParentID
+			}
+		}
+	}
+
 	startMap := make(map[string]spec.Start)
 	startIDs := make(map[string]string)
+	var tick1Actors []string
+
 	for i, st := range doc.Starts {
 		sPtr := fmt.Sprintf("/starts/%d", i)
 		if checkSlug(st.ID, sPtr+"/id", "start") {
@@ -381,8 +436,96 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 			presentSet[pid] = true
 		}
 
+		// Present IDs closure: check ancestors and portal endpoints
+		if len(st.PresentIDs) > 0 {
+			for _, pid := range st.PresentIDs {
+				e, ok := entityMap[pid]
+				if !ok {
+					continue
+				}
+				curr := e.ParentID
+				for curr != "" {
+					if !presentSet[curr] {
+						add(sPtr+"/present_ids", st.ID, SeverityError, "MISSING_ANCESTOR_IN_PRESENT",
+							fmt.Sprintf("present entity %q requires ancestor %q to also be in present_ids", pid, curr))
+						break
+					}
+					curr = entityMap[curr].ParentID
+				}
+				if e.Kind == "portal" && e.Portal != nil {
+					if !presentSet[e.Portal.FromID] {
+						add(sPtr+"/present_ids", st.ID, SeverityError, "MISSING_PORTAL_ENDPOINT",
+							fmt.Sprintf("portal %q requires from_id %q to be in present_ids", pid, e.Portal.FromID))
+					}
+					if !presentSet[e.Portal.ToID] {
+						add(sPtr+"/present_ids", st.ID, SeverityError, "MISSING_PORTAL_ENDPOINT",
+							fmt.Sprintf("portal %q requires to_id %q to be in present_ids", pid, e.Portal.ToID))
+					}
+				}
+			}
+		}
+
+		// Overrides validation
+		for oIdx, ov := range st.Overrides {
+			oPtr := fmt.Sprintf("%s/overrides/%d", sPtr, oIdx)
+			if _, ok := entityMap[ov.EntityID]; !ok {
+				add(oPtr+"/entity_id", ov.EntityID, SeverityError, "UNKNOWN_OVERRIDE_TARGET",
+					fmt.Sprintf("override targets unknown entity %q", ov.EntityID))
+			} else if len(st.PresentIDs) > 0 && !presentSet[ov.EntityID] {
+				add(oPtr+"/entity_id", ov.EntityID, SeverityError, "OVERRIDE_TARGET_NOT_PRESENT",
+					fmt.Sprintf("override targets entity %q which is not in present_ids", ov.EntityID))
+			}
+		}
+
+		// Mind overrides validation
+		for mIdx, mo := range st.Minds {
+			moPtr := fmt.Sprintf("%s/minds/%d", sPtr, mIdx)
+			if _, ok := charMap[mo.OwnerID]; !ok {
+				add(moPtr+"/owner_id", mo.OwnerID, SeverityError, "UNKNOWN_MIND_OWNER",
+					fmt.Sprintf("start mind override references unknown character %q", mo.OwnerID))
+			}
+			var ownerMind *spec.Mind
+			for mIdx2 := range doc.Minds {
+				if doc.Minds[mIdx2].OwnerID == mo.OwnerID {
+					ownerMind = &doc.Minds[mIdx2]
+					break
+				}
+			}
+			ownerSubjs := make(map[string]bool)
+			ownerClaims := make(map[string]bool)
+			if ownerMind != nil {
+				for _, s := range ownerMind.Subjects {
+					ownerSubjs[s.ID] = true
+				}
+				for _, d := range ownerMind.Dossiers {
+					for _, c := range d.Claims {
+						ownerClaims[c.ID] = true
+					}
+				}
+			}
+			for _, ups := range mo.UpsertSubjects {
+				ownerSubjs[ups.ID] = true
+			}
+			for cIdx, up := range mo.UpsertClaims {
+				cPtr := fmt.Sprintf("%s/upsert_claims/%d", moPtr, cIdx)
+				if !ownerSubjs[up.SubjectID] && up.SubjectID != mo.OwnerID {
+					add(cPtr+"/subject_id", up.SubjectID, SeverityError, "UNKNOWN_SUBJECT",
+						fmt.Sprintf("upsert_claim subject %q not found in mind", up.SubjectID))
+				}
+			}
+			for rIdx, retID := range mo.RetractClaimIDs {
+				rPtr := fmt.Sprintf("%s/retract_claim_ids/%d", moPtr, rIdx)
+				if !ownerClaims[retID] {
+					add(rPtr, retID, SeverityWarning, "UNKNOWN_RETRACT_CLAIM",
+						fmt.Sprintf("retract_claim_id %q does not match any existing claim in mind", retID))
+				}
+			}
+		}
+
 		// Check initial events
 		eventIDs := make(map[string]string)
+		actorsReachedInStart := make(map[string]bool)
+
 		for j, ev := range st.Events {
 			ePtr := fmt.Sprintf("%s/events/%d", sPtr, j)
 			if checkSlug(ev.ID, ePtr+"/id", "event") {
@@ -397,6 +540,17 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 			}
 			if !spaceEntities[ev.LocationID] {
 				add(ePtr+"/location_id", ev.ID, SeverityError, "UNKNOWN_SPACE", fmt.Sprintf("event location %q is not a space", ev.LocationID))
+			}
+
+			// Trace which actors are reached by tick 1 event
+			if ev.Tick == 1 {
+				for aID, spID := range actorSpaceMap {
+					if spID == ev.LocationID {
+						if len(st.PresentIDs) == 0 || presentSet[aID] {
+							actorsReachedInStart[aID] = true
+						}
+					}
+				}
 			}
 
 			// Authoring lint: quoted dialogue in events
@@ -416,8 +570,25 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 		}
 		if !hasTick1Event {
 			add(sPtr+"/events", st.ID, SeverityError, "NO_TICK1_EVENT", "start must contain at least one tick-1 event to trigger simulation wake-up")
+		} else if len(actorsReachedInStart) == 0 {
+			add(sPtr+"/events", st.ID, SeverityError, "NO_ACTORS_REACHED",
+				"none of the tick-1 events reach any present actor in the world; simulation would stall")
+		}
+
+		if startID == "" || startID == st.ID {
+			for aID := range actorsReachedInStart {
+				tick1Actors = append(tick1Actors, aID)
+			}
 		}
 	}
+
+	if startID != "" {
+		if _, ok := startMap[startID]; !ok {
+			add("/starts", startID, SeverityError, "START_NOT_FOUND", fmt.Sprintf("specified start ID %q not found in scenario starts", startID))
+		}
+	}
+
+	slices.Sort(tick1Actors)
 
 	// Determine overall validity
 	hasError := false
@@ -429,7 +600,8 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 	}
 
 	return ValidationReport{
-		Valid:  !hasError,
-		Issues: issues,
+		Valid:                !hasError,
+		Issues:               issues,
+		ActorsReachedOnTick1: tick1Actors,
 	}
 }

@@ -2,6 +2,7 @@ package tests
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,5 +87,39 @@ func TestAccidentalArrangementScenarioLoading(t *testing.T) {
 	}
 	if !foundHumiliation {
 		t.Fatalf("expected mention of 'Harrison' to recall ep-zack-lecture-humiliation")
+	}
+
+	// 4. Verify No Duplicate Subjects on Perceiving Authored Places (Identity Bindings)
+	beforeSubjs := len(nellyMind.SubjectsSnapshot())
+	nellyMind.RecordTurn(memory.Turn{
+		Perceived: []memory.Percept{
+			{EntityID: "living-room", LOD: 3, Name: "Nelly's Apartment - Living Room", Kind: memory.SubjectPlace},
+		},
+	})
+	afterSubjs := len(nellyMind.SubjectsSnapshot())
+	if afterSubjs != beforeSubjs {
+		t.Fatalf("perceiving living-room created a duplicate subject (before=%d, after=%d)", beforeSubjs, afterSubjs)
+	}
+
+	// 5. Verify Start Mind Overlays Applied
+	doss, ok := zackMind.GetDossier("zack")
+	if !ok {
+		t.Fatalf("missing zack self dossier")
+	}
+	foundStartClaim := false
+	for _, c := range doss.Claims {
+		if c.ID == "c-zk-self-1" {
+			foundStartClaim = true
+			break
+		}
+	}
+	if !foundStartClaim {
+		t.Fatalf("expected start overlay claim 'c-zk-self-1' in zack self dossier")
+	}
+
+	// 6. Verify Character Traits, Likes, and Dislikes in Profiles
+	zackActor := inst.Actors[sim.EntityID("zack")]
+	if !strings.Contains(zackActor.Profile.Background, "Likes structural architecture") {
+		t.Fatalf("expected zack profile background to contain rendered likes, got: %s", zackActor.Profile.Background)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"omnia.adityagupta.dev/pkg/scenario"
 )
@@ -85,10 +86,16 @@ func handleScenario(args []string) {
 		} else {
 			if len(report.Issues) == 0 {
 				fmt.Printf("✓ %s is valid (scenario %s %s)\n", filePath, doc.Meta.ID, doc.Format.Version)
+				if len(report.ActorsReachedOnTick1) > 0 {
+					fmt.Printf("  Tick-1 active actors: %s\n", strings.Join(report.ActorsReachedOnTick1, ", "))
+				}
 			} else {
 				fmt.Printf("Validation report for %s:\n", filePath)
 				for _, iss := range report.Issues {
 					fmt.Printf("  [%s] %s (%s): %s\n", iss.Severity, iss.Pointer, iss.Code, iss.Message)
+				}
+				if len(report.ActorsReachedOnTick1) > 0 {
+					fmt.Printf("  Tick-1 active actors: %s\n", strings.Join(report.ActorsReachedOnTick1, ", "))
 				}
 				if report.Valid {
 					fmt.Printf("✓ %s passed with warnings/notes\n", filePath)
