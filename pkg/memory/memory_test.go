@@ -329,7 +329,7 @@ func TestSnapshotSerializationRoundTrip(t *testing.T) {
 func TestConsolidationWatermarkIdempotencyAndNoLoss(t *testing.T) {
 	mind := NewMind("ruth", WithBudgetTokens(50))
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	mind.EnsureOpenEpisode("scene-a", "lot-a", 1, now)
+	mind.EnsureOpenEpisode("scene-a", "lot-a", "Lot A", 1, now)
 
 	for i := 0; i < 8; i++ {
 		mind.RecordTurn(Turn{
@@ -366,7 +366,7 @@ func TestConsolidationWatermarkIdempotencyAndNoLoss(t *testing.T) {
 	}
 
 	// 3. Jobs must not mix scenes across episodes
-	mind.EnsureOpenEpisode("scene-b", "lot-b", 2, now.Add(time.Minute))
+	mind.EnsureOpenEpisode("scene-b", "lot-b", "Lot B", 2, now.Add(time.Minute))
 	for i := 0; i < 5; i++ {
 		mind.RecordTurn(Turn{
 			SceneID:    "scene-b",

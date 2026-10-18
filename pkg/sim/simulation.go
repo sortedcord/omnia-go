@@ -486,11 +486,18 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				}
 
 				locID := string(c.spaceID)
+				locName := locID
+				s.mu.RLock()
+				if spaceEnt, ok := s.Entities[c.spaceID]; ok && spaceEnt.Name != "" {
+					locName = spaceEnt.Name
+				}
+				s.mu.RUnlock()
 				if locID == "" && len(locChain) > 0 {
 					locID = locChain[0]
+					locName = locID
 				}
 
-				_, _, closedJob := c.entity.Mind.Mind.EnsureOpenEpisode(string(c.sceneID), locID, currentTick, s.Clock.CurrentTime())
+				_, _, closedJob := c.entity.Mind.Mind.EnsureOpenEpisode(string(c.sceneID), locID, locName, currentTick, s.Clock.CurrentTime())
 				if closedJob != nil && s.Consolidator != nil {
 					var availSubjIDs []string
 					for _, s := range c.entity.Mind.Mind.SubjectsSnapshot() {
@@ -1031,11 +1038,12 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			go func(mind *actor.Actor, in DistillInput, out chan<- DistillResult) {
 				res, err := s.Distiller.Distill(ctx, in)
 				if err == nil {
-					applied, rejected := mind.ApplyThoughtOps(in.Tick, res.Ops, in.KnownEntities)
-					res.Applied = applied
-					res.Rejected = rejected
 					if mind.Mind != nil && len(res.DossierOps) > 0 {
 						mind.Mind.ApplyDossierOps(in.Tick, res.DossierOps, in.Time)
+					} else if mind.Mind == nil {
+						applied, rejected := mind.ApplyThoughtOps(in.Tick, res.Ops, in.KnownEntities)
+						res.Applied = applied
+						res.Rejected = rejected
 					}
 				}
 				out <- res

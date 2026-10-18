@@ -144,10 +144,27 @@ func (a *Actor) AddThought(t Thought) Thought {
 		if t.Kind != ThoughtIntention && t.Kind != ThoughtFeeling && len(t.Links) > 0 {
 			subjectID = t.Links[0]
 			if _, exists := a.Mind.GetSubject(subjectID); !exists {
+				kind := memory.SubjectPerson
+				lowerID := strings.ToLower(subjectID)
+				if strings.Contains(lowerID, "room") || strings.Contains(lowerID, "kitchen") || strings.Contains(lowerID, "apartment") ||
+					strings.Contains(lowerID, "hall") || strings.Contains(lowerID, "deck") || strings.Contains(lowerID, "cabin") ||
+					strings.Contains(lowerID, "space") || strings.Contains(lowerID, "lot") {
+					kind = memory.SubjectPlace
+				} else if strings.Contains(lowerID, "notes") || strings.Contains(lowerID, "table") || strings.Contains(lowerID, "chair") ||
+					strings.Contains(lowerID, "clock") || strings.Contains(lowerID, "phone") || strings.Contains(lowerID, "door") ||
+					strings.Contains(lowerID, "item") || strings.Contains(lowerID, "fridge") {
+					kind = memory.SubjectObject
+				}
+
+				name := subjectID
+				if kind == memory.SubjectPlace || kind == memory.SubjectObject {
+					name = strings.Title(strings.ReplaceAll(subjectID, "-", " "))
+				}
+
 				a.Mind.AddSubject(&memory.Subject{
 					ID:    subjectID,
-					Kind:  memory.SubjectPerson,
-					Names: []string{subjectID},
+					Kind:  kind,
+					Names: []string{name, subjectID},
 					Bindings: []memory.Binding{
 						{
 							EntityID:   subjectID,

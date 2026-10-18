@@ -228,7 +228,7 @@ func (m *Mind) findOrCreateSubjectForEntityLocked(entityID string, defaultName s
 
 // EnsureOpenEpisode checks if the scene changed or if an episode needs to be opened.
 // If the scene changed, it closes the existing episode and returns a closed consolidation job.
-func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTime time.Time) (epID string, newlyOpened bool, closedJob *ConsolidateJob) {
+func (m *Mind) EnsureOpenEpisode(sceneID, locationID, locationName string, tick int, inWorldTime time.Time) (epID string, newlyOpened bool, closedJob *ConsolidateJob) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -239,7 +239,7 @@ func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTi
 			if curEp.SceneID == sceneID && timeGap <= 10*time.Minute {
 				curEp.End = inWorldTime
 				if locationID != "" {
-					placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, locationID, SubjectPlace)
+					placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, locationName, SubjectPlace)
 					curEp.PlaceIDs = addUniqueString(curEp.PlaceIDs, placeSubjID)
 				}
 				return curEp.ID, false, nil
@@ -255,7 +255,8 @@ func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTi
 					epTurns = append(epTurns, t)
 				}
 			}
-			if len(epTurns) > 0 {
+			if len(epTurns) > 0 && !m.isConsolidating {
+				m.isConsolidating = true
 				closedJob = &ConsolidateJob{
 					EpisodeID: closedID,
 					FromSeq:   epTurns[0].Seq,
@@ -284,7 +285,7 @@ func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTi
 		Importance: 0.50,
 	}
 	if locationID != "" {
-		placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, locationID, SubjectPlace)
+		placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, locationName, SubjectPlace)
 		newEp.PlaceIDs = []string{placeSubjID}
 	}
 
@@ -454,9 +455,38 @@ func (m *Mind) ApplyDossierOps(tick int, ops []DossierOp, inWorldTime time.Time)
 				d = &Dossier{SubjectID: subjID}
 				m.dossiers[subjID] = d
 			}
-			// Allocate ClaimID if needed
-			if op.Op == "upsert_claim" && op.ClaimID == "" {
-				op.ClaimID = m.allocClaimIDLocked()
+			// Allocate ClaimID if needed, preventing duplicate IDs across dossiers
+			if op.Op == "upsert_claim" {
+				if op.ClaimID == "" {
+					op.ClaimID = m.allocClaimIDLocked()
+				} else {
+					claimConflict := false
+					for otherSubjID, otherD := range m.dossiers {
+						if otherSubjID != subjID {
+							for _, c := range otherD.Claims {
+								if c.ID == op.ClaimID {
+									claimConflict = true
+									break
+								}
+							}
+							if claimConflict {
+								break
+							}
+							for _, c := range otherD.ArchivedClaims {
+								if c.ID == op.ClaimID {
+									claimConflict = true
+									break
+								}
+							}
+							if claimConflict {
+								break
+							}
+						}
+					}
+					if claimConflict {
+						op.ClaimID = m.allocClaimIDLocked()
+					}
+				}
 			}
 
 			if err := d.ApplyOp(tick, op, m.openEpisodeID); err != nil {
@@ -643,7 +673,7 @@ func (m *Mind) FinishConsolidation(job ConsolidateJob, beats []Beat) {
 	if len(beats) == 0 {
 		m.emptyConsolidations++
 		if m.emptyConsolidations >= 2 {
-			_, beatText, fSeq, tSeq := m.buffer.DegradedEvictionFallback()
+			_, beatText, fSeq, tSeq := m.buffer.DegradedEvictionFallbackForEpisode(job.EpisodeID)
 			if beatText != "" && job.EpisodeID != "" {
 				if ep, ok := m.episodes[job.EpisodeID]; ok {
 					ep.Beats = append(ep.Beats, Beat{
@@ -676,7 +706,7 @@ func (m *Mind) AbortConsolidation() {
 
 	m.isConsolidating = false
 	if m.buffer.EstimatedTokens() > 2*m.buffer.budgetTokens {
-		_, beatText, fSeq, tSeq := m.buffer.DegradedEvictionFallback()
+		_, beatText, fSeq, tSeq := m.buffer.DegradedEvictionFallbackForEpisode(m.openEpisodeID)
 		if beatText != "" && m.openEpisodeID != "" {
 			if ep, ok := m.episodes[m.openEpisodeID]; ok {
 				ep.Beats = append(ep.Beats, Beat{
@@ -702,13 +732,11 @@ func (m *Mind) GetSubject(id string) (*Subject, bool) {
 }
 
 func (m *Mind) GetDossier(subjectID string) (*Dossier, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	d, ok := m.dossiers[subjectID]
 	if !ok {
-		d = &Dossier{SubjectID: subjectID}
-		m.dossiers[subjectID] = d
-		return d.DeepCopy(), false
+		return nil, false
 	}
 	return d.DeepCopy(), true
 }

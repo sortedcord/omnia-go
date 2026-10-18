@@ -238,6 +238,54 @@ func (b *WorkingBuffer) DegradedEvictionFallback() (evicted []Turn, beatText str
 	return evicted, beatText, fromSeq, toSeq
 }
 
+// DegradedEvictionFallbackForEpisode mechanically condenses and evicts turns specifically belonging to episodeID
+// without touching turns of other episodes in the buffer.
+func (b *WorkingBuffer) DegradedEvictionFallbackForEpisode(episodeID string) (evicted []Turn, beatText string, fromSeq, toSeq int64) {
+	if len(b.turns) <= b.minVerbatimTurns {
+		return nil, "", 0, 0
+	}
+
+	keepFrom := len(b.turns) - b.minVerbatimTurns
+	var keep []Turn
+	for i, t := range b.turns {
+		if t.EpisodeID == episodeID && i < keepFrom {
+			evicted = append(evicted, t)
+		} else {
+			keep = append(keep, t)
+		}
+	}
+
+	if len(evicted) == 0 {
+		return nil, "", 0, 0
+	}
+
+	b.turns = keep
+	fromSeq = evicted[0].Seq
+	toSeq = evicted[len(evicted)-1].Seq
+	if toSeq > b.lastConsolidatedSeq {
+		b.lastConsolidatedSeq = toSeq
+	}
+
+	var sb strings.Builder
+	sb.WriteString("[Degraded Consolidation Summary]: ")
+	for i, t := range evicted {
+		if i > 0 {
+			sb.WriteString(" Then, ")
+		}
+		firstSentence := strings.Split(t.Perception, ".")[0]
+		firstSentence = strings.TrimSpace(firstSentence)
+		if firstSentence != "" {
+			sb.WriteString(firstSentence)
+			sb.WriteString(". ")
+		}
+		if t.Action.Action != "" {
+			sb.WriteString(t.Action.Action)
+		}
+	}
+	beatText = sb.String()
+	return evicted, beatText, fromSeq, toSeq
+}
+
 func estimateTurnTokens(t Turn) int {
 	chars := len(t.Perception) + len(t.Cognition) + len(t.Action.Action)
 	for _, tgt := range t.Action.Targets {
