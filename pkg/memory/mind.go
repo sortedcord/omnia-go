@@ -90,6 +90,20 @@ func (m *Mind) Buffer() *WorkingBuffer {
 	return m.buffer
 }
 
+// BufferLen returns the number of turns currently held in the working buffer under read lock.
+func (m *Mind) BufferLen() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.buffer.Len()
+}
+
+// ReplayTurns returns the recent turns to include in LLM chat history under read lock.
+func (m *Mind) ReplayTurns() []Turn {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.buffer.ReplayTurns()
+}
+
 // OpenEpisodeID returns the ID of the currently open episode, if any.
 func (m *Mind) OpenEpisodeID() string {
 	m.mu.RLock()
@@ -260,6 +274,9 @@ func (m *Mind) ApplyDossierOps(tick int, ops []DossierOp, inWorldTime time.Time)
 			if id == "" {
 				id = fmt.Sprintf("s-%s-%d", m.ownerID, m.nextSubjectSeq)
 				m.nextSubjectSeq++
+			} else if _, exists := m.subjects[id]; exists {
+				rejected = append(rejected, fmt.Sprintf("new_subject: subject %q already exists", id))
+				continue
 			}
 			kind := op.SubjectKind
 			if kind == "" {
@@ -449,7 +466,7 @@ type ConsolidateJob struct {
 	Turns     []Turn
 }
 
-// StartConsolidation atomically marks the buffer as consolidating and returns uncommitted turns.
+// StartConsolidation atomically marks the buffer as consolidating and returns uncommitted turns for one episode.
 func (m *Mind) StartConsolidation() (ConsolidateJob, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -463,12 +480,27 @@ func (m *Mind) StartConsolidation() (ConsolidateJob, bool) {
 		return ConsolidateJob{}, false
 	}
 
+	// Scope the job strictly to the first uncommitted episode in the buffer
+	targetEpID := unconsolidated[0].EpisodeID
+	var epTurns []Turn
+	for _, t := range unconsolidated {
+		if t.EpisodeID == targetEpID {
+			epTurns = append(epTurns, t)
+		} else {
+			break
+		}
+	}
+
+	if len(epTurns) == 0 {
+		return ConsolidateJob{}, false
+	}
+
 	m.isConsolidating = true
 	return ConsolidateJob{
-		EpisodeID: m.openEpisodeID,
-		FromSeq:   unconsolidated[0].Seq,
-		ToSeq:     unconsolidated[len(unconsolidated)-1].Seq,
-		Turns:     unconsolidated,
+		EpisodeID: targetEpID,
+		FromSeq:   epTurns[0].Seq,
+		ToSeq:     epTurns[len(epTurns)-1].Seq,
+		Turns:     epTurns,
 	}, true
 }
 
@@ -478,7 +510,18 @@ func (m *Mind) FinishConsolidation(job ConsolidateJob, beats []Beat) {
 	defer m.mu.Unlock()
 
 	m.isConsolidating = false
-	if len(beats) > 0 && job.EpisodeID != "" {
+
+	// Idempotency: if this sequence range was already committed, do nothing
+	if job.ToSeq <= m.buffer.LastConsolidatedSeq() {
+		return
+	}
+
+	// Never commit or evict turns if zero beats were produced (prevents silent turn loss)
+	if len(beats) == 0 {
+		return
+	}
+
+	if job.EpisodeID != "" {
 		if ep, ok := m.episodes[job.EpisodeID]; ok {
 			ep.Beats = append(ep.Beats, beats...)
 		}

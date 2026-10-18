@@ -327,3 +327,25 @@ func TestDestroyedEntityPreservesMindBindingsAndClaims(t *testing.T) {
 			snapBefore, snapAfter)
 	}
 }
+
+func TestRunClosesOpenEpisodes(t *testing.T) {
+	world := offlineWorld()
+	world.Consolidator = nil
+	room := world.SpawnSpace("room", "Room", "", true)
+	a := actor.New(actor.Profile{ID: "x", Name: "X"})
+	ent, err := world.SpawnActor("x", a, room.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ent.Controller = fakeController{action: actor.Action{Type: actor.Wait, Action: "wait"}}
+	world.DeliverDirectEvent("x", "a sound")
+
+	if _, err = world.Run(context.Background(), 1, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	eps := a.Mind.EpisodesSnapshot()
+	if len(eps) != 1 || eps[0].Status != memory.EpisodeClosed {
+		t.Fatalf("Run ended without closing episode: %+v", eps)
+	}
+}

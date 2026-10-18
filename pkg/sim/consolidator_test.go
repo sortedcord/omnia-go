@@ -10,9 +10,14 @@ import (
 )
 
 func TestConsolidatorSchemaValidation(t *testing.T) {
-	s := ConsolidatorSchema()
-	if err := llm.ValidateStrict(s); err != nil {
-		t.Fatalf("expected ConsolidatorSchema to pass ValidateStrict: %v", err)
+	s1 := ConsolidatorSchema(nil)
+	if err := llm.ValidateStrict(s1); err != nil {
+		t.Fatalf("expected ConsolidatorSchema(nil) to pass ValidateStrict: %v", err)
+	}
+
+	s2 := ConsolidatorSchema([]string{"s-zack", "s-nelly"})
+	if err := llm.ValidateStrict(s2); err != nil {
+		t.Fatalf("expected ConsolidatorSchema with subjects to pass ValidateStrict: %v", err)
 	}
 }
 
@@ -74,7 +79,8 @@ func TestConsolidatorExecution(t *testing.T) {
 				Action:     memory.ActionRecord{Type: "speak", Action: "Please don't think I'm crazy."},
 			},
 		},
-		IsSceneClose: true,
+		IsSceneClose:        true,
+		AvailableSubjectIDs: []string{"s-zack", "s-notes", "s-mia"},
 	}
 
 	res, err := consolidator.Consolidate(context.Background(), input)

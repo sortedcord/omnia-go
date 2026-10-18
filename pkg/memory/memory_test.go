@@ -328,3 +328,87 @@ func TestSnapshotSerializationRoundTrip(t *testing.T) {
 		t.Fatal("expected ep-zack-1 episode restored")
 	}
 }
+
+func TestConsolidationWatermarkIdempotencyAndNoLoss(t *testing.T) {
+	mind := NewMind("ruth", WithBudgetTokens(50))
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	mind.EnsureOpenEpisode("scene-a", "lot-a", 1, now)
+
+	for i := 0; i < 8; i++ {
+		mind.RecordTurn(Turn{
+			SceneID:    "scene-a",
+			Perception: strings.Repeat("x", 100),
+			Action:     ActionRecord{Action: "Waiting"},
+		})
+	}
+
+	job, ok := mind.StartConsolidation()
+	if !ok {
+		t.Fatal("expected consolidation job to start")
+	}
+
+	// 1. Invariant I5: Empty result must NOT commit watermark or evict turns
+	mind.FinishConsolidation(job, nil)
+	if mind.Buffer().LastConsolidatedSeq() != 0 || mind.Buffer().Len() != 8 {
+		t.Fatalf("empty result committed through seq=%d and evicted turns, len: %d",
+			mind.Buffer().LastConsolidatedSeq(), mind.Buffer().Len())
+	}
+
+	// 2. Commit valid beats
+	job, ok = mind.StartConsolidation()
+	if !ok {
+		t.Fatal("expected consolidation job to start")
+	}
+	beats := []Beat{{FromSeq: job.FromSeq, ToSeq: job.ToSeq, Text: "remembered"}}
+	mind.FinishConsolidation(job, beats)
+
+	// Duplicate commit with same job must be an idempotent no-op
+	mind.FinishConsolidation(job, beats)
+	if len(mind.episodes[job.EpisodeID].Beats) != 1 {
+		t.Fatalf("duplicate commit appended beats twice: %d beats", len(mind.episodes[job.EpisodeID].Beats))
+	}
+
+	// 3. Jobs must not mix scenes across episodes
+	mind.EnsureOpenEpisode("scene-b", "lot-b", 2, now.Add(time.Minute))
+	for i := 0; i < 5; i++ {
+		mind.RecordTurn(Turn{
+			SceneID:    "scene-b",
+			Perception: strings.Repeat("b", 100),
+			Action:     ActionRecord{Action: "Talking"},
+		})
+	}
+
+	job2, ok := mind.StartConsolidation()
+	if !ok {
+		t.Fatal("expected job2 to start")
+	}
+	for _, tr := range job2.Turns {
+		if tr.EpisodeID != job2.EpisodeID {
+			t.Fatalf("job episode %s contains turn seq %d from episode %s", job2.EpisodeID, tr.Seq, tr.EpisodeID)
+		}
+	}
+}
+
+func TestNewSubjectMustNotReplaceExisting(t *testing.T) {
+	mind := NewMind("ruth")
+	mind.AddSubject(&Subject{
+		ID:    "s-a",
+		Names: []string{"Alice"},
+		Bindings: []Binding{
+			{EntityID: "alice", Mode: BindingIdentity, Confidence: 1},
+		},
+	})
+
+	_, rejected := mind.ApplyDossierOps(1, []DossierOp{
+		{Op: "new_subject", SubjectID: "s-a", Name: "Bob"},
+	}, time.Time{})
+
+	if len(rejected) == 0 {
+		t.Fatal("expected duplicate new_subject to be rejected")
+	}
+
+	s, ok := mind.GetSubject("s-a")
+	if !ok || s.Names[0] != "Alice" || len(s.Bindings) != 1 {
+		t.Fatalf("existing subject corrupted: %+v", s)
+	}
+}

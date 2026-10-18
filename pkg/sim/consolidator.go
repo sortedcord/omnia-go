@@ -12,16 +12,17 @@ import (
 
 // ConsolidateInput packages the uncommitted turns and scene context for episode condensation.
 type ConsolidateInput struct {
-	ActorID      EntityID
-	ActorName    string
-	Personality  string
-	SceneID      string
-	LocationID   string
-	FromSeq      int64
-	ToSeq        int64
-	Turns        []memory.Turn
-	PriorBeats   []memory.Beat
-	IsSceneClose bool // True if closing the episode; false if mid-scene rolling condensation
+	ActorID             EntityID
+	ActorName           string
+	Personality         string
+	SceneID             string
+	LocationID          string
+	FromSeq             int64
+	ToSeq               int64
+	Turns               []memory.Turn
+	PriorBeats          []memory.Beat
+	IsSceneClose        bool // True if closing the episode; false if mid-scene rolling condensation
+	AvailableSubjectIDs []string
 }
 
 // ConsolidateResult captures the condensed beats and finalized episode metadata.
@@ -64,10 +65,15 @@ func NewLLMConsolidator(client llm.Client, model string) *LLMConsolidator {
 }
 
 // ConsolidatorSchema constructs the strict JSON schema for episode condensation.
-func ConsolidatorSchema() *llm.Schema {
+func ConsolidatorSchema(availableSubjectIDs []string) *llm.Schema {
+	subjSchema := llm.Str("Subject ID")
+	if len(availableSubjectIDs) > 0 {
+		subjSchema = llm.Enum("Subject ID", availableSubjectIDs...)
+	}
+
 	beatItem := llm.Obj("A condensed chronological beat segment.",
 		llm.Prop("text", llm.Str("First-person condensed segment (<= 60 words) capturing key actions, dialogue, and shifts.")),
-		llm.Prop("subject_ids", llm.Arr("Entity or actor IDs that featured prominently in this beat.", llm.Str("Subject ID"))),
+		llm.Prop("subject_ids", llm.Arr("Entity or actor IDs that featured prominently in this beat.", subjSchema)),
 	)
 
 	return llm.Obj("Condensed episodic archive memory.",
@@ -76,7 +82,7 @@ func ConsolidatorSchema() *llm.Schema {
 		llm.Prop("summary", llm.Str("First-person overview summary of what occurred and what it meant to you (<= 80 words).")),
 		llm.Prop("tone", llm.Str("Overall emotional tone or atmosphere (e.g. 'mortified relief', 'awkward camaraderie').")),
 		llm.Prop("importance", llm.Num("Formative importance score between 0.05 (mundane routine) and 1.00 (life-altering event).")),
-		llm.Prop("formative_subject_ids", llm.Arr("IDs of subjects whose relationship or impression was strongly affected.", llm.Str("Subject ID"))),
+		llm.Prop("formative_subject_ids", llm.Arr("IDs of subjects whose relationship or impression was strongly affected.", subjSchema)),
 	)
 }
 
@@ -139,7 +145,7 @@ CONSOLIDATION INVARIANTS:
 			{Role: llm.System, Content: systemPrompt},
 			{Role: llm.User, Content: sb.String()},
 		},
-		ResponseFormat:   llm.StrictSchema("episode_consolidation", "Condensed episodic archive memory.", ConsolidatorSchema()),
+		ResponseFormat:   llm.StrictSchema("episode_consolidation", "Condensed episodic archive memory.", ConsolidatorSchema(in.AvailableSubjectIDs)),
 		ReasoningEffort:  llm.ReasoningLow,
 		IncludeReasoning: true,
 	}

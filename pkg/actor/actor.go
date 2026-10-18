@@ -145,9 +145,16 @@ func (a *Actor) AddThought(t Thought) Thought {
 			subjectID = t.Links[0]
 			if _, exists := a.Mind.GetSubject(subjectID); !exists {
 				a.Mind.AddSubject(&memory.Subject{
-					ID:     subjectID,
-					Kind:   memory.SubjectPerson,
-					Names:  []string{subjectID},
+					ID:    subjectID,
+					Kind:  memory.SubjectPerson,
+					Names: []string{subjectID},
+					Bindings: []memory.Binding{
+						{
+							EntityID:   subjectID,
+							Mode:       memory.BindingIdentity,
+							Confidence: 1.0,
+						},
+					},
 					Origin: memory.OriginAuthored,
 				})
 			}
@@ -269,8 +276,8 @@ func (a *Actor) buildMessages(currentStimulus SensoryEvent) []llm.Message {
 	}
 
 	// 4. Subjective Turn History (Working Buffer if available, else legacy Turns)
-	if a.Mind != nil && a.Mind.Buffer().Len() > 0 {
-		for _, turn := range a.Mind.Buffer().ReplayTurns() {
+	if a.Mind != nil && a.Mind.BufferLen() > 0 {
+		for _, turn := range a.Mind.ReplayTurns() {
 			stimulusText := turn.Perception
 			if turn.Tick > 0 {
 				stimulusText = fmt.Sprintf("[SIMULATION SENSORY EVENT: %s]\n%s", turn.Time.Format("15:04:05 UTC"), turn.Perception)

@@ -86,7 +86,7 @@ func DistillerSchema(availableSubjectIDs []string, availableEntityIDs []string) 
 	opItem := llm.Obj("An atomic mutation on the actor's dossiers and mental reality.",
 		llm.Prop("op", llm.Enum("Mutation operator: upsert_claim, retract_claim, set_impression, add_name, new_subject, bind, unbind.",
 			"upsert_claim", "retract_claim", "set_impression", "add_name", "new_subject", "bind", "unbind")),
-		llm.Prop("subject_id", subjSchema),
+		llm.Prop("subject_id", llm.Nullable(subjSchema)),
 		llm.Prop("claim_id", llm.Nullable(llm.Str("Target claim ID (e.g. c-zack-1). Required for retract_claim; optional for upsert_claim; null for others."))),
 		llm.Prop("kind", llm.Nullable(llm.Enum("Cognitive category: belief (conviction), intention (plan/goal), feeling (somatic/emotional sensation), suspicion (distrust/doubt).",
 			"belief", "intention", "feeling", "suspicion"))),
@@ -138,10 +138,32 @@ DISTILLATION RULES:
 	sb.WriteString(fmt.Sprintf("CHARACTER: %s | PERSONALITY: %s\n", in.ActorName, in.Personality))
 	sb.WriteString(fmt.Sprintf("TICK: %d | TIME: %s\n\n", in.Tick, in.Timestamp))
 
-	sb.WriteString("CURRENT EXISTING THOUGHTS IN MEMORY:\n")
-	if len(in.Thoughts) == 0 {
-		sb.WriteString("  (none)\n")
-	} else {
+	if in.Mind != nil {
+		sb.WriteString("REGISTERED SUBJECTS IN MIND:\n")
+		for _, s := range in.Mind.SubjectsSnapshot() {
+			namesStr := strings.Join(s.Names, ", ")
+			sb.WriteString(fmt.Sprintf("- Subject ID: %q | Names: [%s] | Kind: %s\n", s.ID, namesStr, s.Kind))
+		}
+
+		sb.WriteString("\nCURRENT ACTIVE DOSSIERS & BELIEFS:\n")
+		for _, d := range in.Mind.DossiersSnapshot() {
+			if len(d.Claims) > 0 || d.Impression != "" {
+				sb.WriteString(fmt.Sprintf("- Dossier for Subject %q:\n", d.SubjectID))
+				if d.Impression != "" {
+					sb.WriteString(fmt.Sprintf("  Impression: %s\n", d.Impression))
+				}
+				for _, c := range d.Claims {
+					fixedStr := ""
+					if c.Fixed {
+						fixedStr = " (FIXED DELUSION/CONVICTION: do not retract or alter)"
+					}
+					sb.WriteString(fmt.Sprintf("  * [Claim ID: %s | %s | salience: %.2f | conf: %.2f]%s %s\n",
+						c.ID, c.Kind, c.Salience, c.Conviction, fixedStr, c.Content))
+				}
+			}
+		}
+	} else if len(in.Thoughts) > 0 {
+		sb.WriteString("CURRENT EXISTING THOUGHTS IN MEMORY:\n")
 		for _, t := range in.Thoughts {
 			linksText := ""
 			if len(t.Links) > 0 {
@@ -149,6 +171,8 @@ DISTILLATION RULES:
 			}
 			sb.WriteString(fmt.Sprintf("- [%s] (%s, salience: %.2f) %s%s\n", t.ID, t.Kind, t.Salience, t.Content, linksText))
 		}
+	} else {
+		sb.WriteString("CURRENT EXISTING THOUGHTS IN MEMORY:\n  (none)\n")
 	}
 
 	sb.WriteString("\nPERCEIVABLE ENTITIES (Available for linking):\n")

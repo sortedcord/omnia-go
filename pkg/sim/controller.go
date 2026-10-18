@@ -10,7 +10,6 @@ import (
 
 	"omnia.adityagupta.dev/pkg/actor"
 	"omnia.adityagupta.dev/pkg/llm"
-	"omnia.adityagupta.dev/pkg/memory"
 )
 
 // ErrQuit signals that a human controller chose to quit the simulation.
@@ -152,18 +151,6 @@ func (h *HumanController) Decide(ctx context.Context, mind *actor.Actor, turn Tu
 			Cognition: fmt.Sprintf("(Human player command: %q)", rawInput),
 			Action:    action,
 		})
-		if mind.Mind != nil {
-			mind.Mind.RecordTurn(memory.Turn{
-				Tick:       turn.Tick,
-				Perception: turn.Stimulus,
-				Cognition:  fmt.Sprintf("(Human player command: %q)", rawInput),
-				Action: memory.ActionRecord{
-					Type:    action.Type.String(),
-					Action:  action.Action,
-					Targets: action.Targets,
-				},
-			})
-		}
 	}
 
 	return &actor.Reaction{

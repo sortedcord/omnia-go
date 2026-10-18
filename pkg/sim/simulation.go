@@ -1001,16 +1001,21 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			// Check if actor's working buffer needs consolidation
 			if s.Consolidator != nil && rt.candidate.entity.Mind != nil && rt.candidate.entity.Mind.Mind != nil {
 				if job, shouldConsolidate := rt.candidate.entity.Mind.Mind.StartConsolidation(); shouldConsolidate {
+					var availSubjIDs []string
+					for _, s := range rt.candidate.entity.Mind.Mind.SubjectsSnapshot() {
+						availSubjIDs = append(availSubjIDs, s.ID)
+					}
 					consInput := ConsolidateInput{
-						ActorID:      rt.candidate.entity.ID,
-						ActorName:    rt.candidate.entity.Name,
-						Personality:  rt.candidate.entity.Mind.Profile.Personality,
-						SceneID:      string(rt.candidate.sceneID),
-						LocationID:   string(rt.candidate.spaceID),
-						FromSeq:      job.FromSeq,
-						ToSeq:        job.ToSeq,
-						Turns:        job.Turns,
-						IsSceneClose: false,
+						ActorID:             rt.candidate.entity.ID,
+						ActorName:           rt.candidate.entity.Name,
+						Personality:         rt.candidate.entity.Mind.Profile.Personality,
+						SceneID:             string(rt.candidate.sceneID),
+						LocationID:          string(rt.candidate.spaceID),
+						FromSeq:             job.FromSeq,
+						ToSeq:               job.ToSeq,
+						Turns:               job.Turns,
+						IsSceneClose:        false,
+						AvailableSubjectIDs: availSubjIDs,
 					}
 					go func(mind *actor.Actor, in ConsolidateInput, j memory.ConsolidateJob) {
 						cRes, cErr := s.Consolidator.Consolidate(ctx, in)
@@ -1057,7 +1062,10 @@ func (s *Simulation) WaitDistills() {
 
 // Run executes the simulation loop for up to maxTicks, or until the scene reaches steady state.
 func (s *Simulation) Run(ctx context.Context, maxTicks int, onTick func(report TickReport)) ([]TickReport, error) {
-	defer s.WaitDistills()
+	defer func() {
+		s.WaitDistills()
+		s.CloseAllEpisodes(context.Background())
+	}()
 	var allReports []TickReport
 
 	for i := 0; i < maxTicks; i++ {
@@ -1094,9 +1102,16 @@ func (s *Simulation) Run(ctx context.Context, maxTicks int, onTick func(report T
 
 // CloseAllEpisodes closes open episodes across all actors and finalizes them.
 func (s *Simulation) CloseAllEpisodes(ctx context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	type closeTask struct {
+		mind   *actor.Actor
+		epID   string
+		input  ConsolidateInput
+		buffer *memory.WorkingBuffer
+		toSeq  int64
+	}
 
+	s.mu.Lock()
+	var tasks []closeTask
 	for _, entity := range s.Entities {
 		if entity.Mind != nil && entity.Mind.Mind != nil {
 			openEpID := entity.Mind.Mind.OpenEpisodeID()
@@ -1115,28 +1130,44 @@ func (s *Simulation) CloseAllEpisodes(ctx context.Context) {
 						fromSeq = unconsolidated[0].Seq
 						toSeq = unconsolidated[len(unconsolidated)-1].Seq
 					}
-					consInput := ConsolidateInput{
-						ActorID:      entity.ID,
-						ActorName:    entity.Name,
-						Personality:  entity.Mind.Profile.Personality,
-						SceneID:      "",
-						LocationID:   locID,
-						FromSeq:      fromSeq,
-						ToSeq:        toSeq,
-						Turns:        unconsolidated,
-						IsSceneClose: true,
+					var availSubjIDs []string
+					for _, s := range entity.Mind.Mind.SubjectsSnapshot() {
+						availSubjIDs = append(availSubjIDs, s.ID)
 					}
-					cRes, err := s.Consolidator.Consolidate(ctx, consInput)
-					if err == nil {
-						for _, b := range cRes.Beats {
-							entity.Mind.Mind.AppendBeat(openEpID, b)
-						}
-						entity.Mind.Mind.FinalizeEpisodeClose(openEpID, cRes.Title, cRes.Summary, cRes.Tone, cRes.Importance, cRes.FormativeSubjectIDs)
-						if toSeq > 0 {
-							buffer.CommitConsolidation(toSeq)
-						}
-					}
+					tasks = append(tasks, closeTask{
+						mind:   entity.Mind,
+						epID:   openEpID,
+						buffer: buffer,
+						toSeq:  toSeq,
+						input: ConsolidateInput{
+							ActorID:             entity.ID,
+							ActorName:           entity.Name,
+							Personality:         entity.Mind.Profile.Personality,
+							SceneID:             "",
+							LocationID:          locID,
+							FromSeq:             fromSeq,
+							ToSeq:               toSeq,
+							Turns:               unconsolidated,
+							IsSceneClose:        true,
+							AvailableSubjectIDs: availSubjIDs,
+						},
+					})
 				}
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	// Execute consolidations outside of s.mu.Lock()
+	for _, t := range tasks {
+		cRes, err := s.Consolidator.Consolidate(ctx, t.input)
+		if err == nil {
+			for _, b := range cRes.Beats {
+				t.mind.Mind.AppendBeat(t.epID, b)
+			}
+			t.mind.Mind.FinalizeEpisodeClose(t.epID, cRes.Title, cRes.Summary, cRes.Tone, cRes.Importance, cRes.FormativeSubjectIDs)
+			if t.toSeq > 0 {
+				t.buffer.CommitConsolidation(t.toSeq)
 			}
 		}
 	}
