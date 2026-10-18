@@ -281,61 +281,6 @@ func Build(doc *spec.Document, opts BuildOptions) (*Instance, error) {
 		}
 	}
 
-	// Spawn Items (Topologically order or multi-pass parent resolution)
-	// Simple pass: insert with parent if parent exists, else defer
-	remainingItems := itemsToSpawn
-	for len(remainingItems) > 0 {
-		var nextRound []spec.Entity
-		progress := false
-		for _, e := range remainingItems {
-			resE := resolveEntity(e)
-			parentID := sim.EntityID(resE.ParentID)
-			_, parentExists := world.Entities[parentID]
-
-			if parentID == "" || parentExists {
-				rel := sim.RelIn
-				placement := ""
-				concealed := false
-				if resE.Link != nil {
-					rel = sim.Relation(resE.Link.Relation)
-					placement = resE.Link.Placement
-					concealed = resE.Link.Concealed
-				}
-				it, err := world.SpawnEntity(
-					sim.EntityID(resE.ID),
-					resE.Name,
-					resE.Description,
-					parentID,
-					sim.Link{Relation: rel, Placement: placement, Concealed: concealed},
-				)
-				if err != nil {
-					return nil, fmt.Errorf("build: failed spawning entity %q: %w", resE.ID, err)
-				}
-				if resE.Salience > 0 {
-					it.Salience = resE.Salience
-				}
-				for _, attr := range resE.Attributes {
-					vis := sim.VisibilityPublic
-					if attr.Visibility == "private" {
-						vis = sim.VisibilityPrivate
-					}
-					var acc []sim.EntityID
-					for _, ac := range attr.Accessors {
-						acc = append(acc, sim.EntityID(ac))
-					}
-					_ = it.Attributes.SetWithVisibility(attr.Key, attr.Value, vis, acc)
-				}
-				progress = true
-			} else {
-				nextRound = append(nextRound, e)
-			}
-		}
-		if !progress && len(nextRound) > 0 {
-			return nil, fmt.Errorf("build: unresolvable item parent hierarchy for %q", nextRound[0].ID)
-		}
-		remainingItems = nextRound
-	}
-
 	// 6. Spawn Actors and Seed 3-Tier Memory Minds
 	for _, e := range actorsToSpawn {
 		resE := resolveEntity(e)
@@ -558,6 +503,80 @@ func Build(doc *spec.Document, opts BuildOptions) (*Instance, error) {
 		}
 
 		actorsMap[sim.EntityID(resE.ID)] = act
+	}
+
+	// 7. Spawn Items (Topologically order or multi-pass parent resolution)
+	// Simple pass: insert with parent if parent exists, else defer
+	remainingItems := itemsToSpawn
+	for len(remainingItems) > 0 {
+		var nextRound []spec.Entity
+		progress := false
+		for _, e := range remainingItems {
+			resE := resolveEntity(e)
+			parentID := sim.EntityID(resE.ParentID)
+			_, parentExists := world.Entities[parentID]
+
+			if parentID == "" || parentExists {
+				rel := sim.RelIn
+				placement := ""
+				concealed := false
+				if resE.Link != nil {
+					rel = sim.Relation(resE.Link.Relation)
+					placement = resE.Link.Placement
+					concealed = resE.Link.Concealed
+				}
+				it, err := world.SpawnEntity(
+					sim.EntityID(resE.ID),
+					resE.Name,
+					resE.Description,
+					parentID,
+					sim.Link{Relation: rel, Placement: placement, Concealed: concealed},
+				)
+				if err != nil {
+					return nil, fmt.Errorf("build: failed spawning entity %q: %w", resE.ID, err)
+				}
+				if resE.Salience > 0 {
+					it.Salience = resE.Salience
+				}
+				for _, attr := range resE.Attributes {
+					vis := sim.VisibilityPublic
+					if attr.Visibility == "private" {
+						vis = sim.VisibilityPrivate
+					}
+					var acc []sim.EntityID
+					for _, ac := range attr.Accessors {
+						acc = append(acc, sim.EntityID(ac))
+					}
+					_ = it.Attributes.SetWithVisibility(attr.Key, attr.Value, vis, acc)
+				}
+				progress = true
+			} else {
+				nextRound = append(nextRound, e)
+			}
+		}
+		if !progress && len(nextRound) > 0 {
+			return nil, fmt.Errorf("build: unresolvable item parent hierarchy for %q", nextRound[0].ID)
+		}
+		remainingItems = nextRound
+	}
+
+	// 8. Attach non-root container spaces (e.g. internal pockets or compartments)
+	for _, e := range doc.Entities {
+		if !presentSet[e.ID] || e.Kind != "space" || e.ParentID == "" {
+			continue
+		}
+		resE := resolveEntity(e)
+		rel := sim.RelIn
+		placement := ""
+		concealed := false
+		if resE.Link != nil {
+			rel = sim.Relation(resE.Link.Relation)
+			placement = resE.Link.Placement
+			concealed = resE.Link.Concealed
+		}
+		_ = world.Move(sim.EntityID(resE.ID), sim.EntityID(resE.ParentID), sim.Link{
+			Relation: rel, Placement: placement, Concealed: concealed,
+		})
 	}
 
 	// 7. Wire Player and Controller

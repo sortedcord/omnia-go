@@ -1,6 +1,8 @@
 package scenario
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"omnia.adityagupta.dev/pkg/scenario/spec"
@@ -11,74 +13,74 @@ func validTestDocument() spec.Document {
 		Format: spec.Format{Name: "omnia.scenario", Version: "1.0"},
 		Meta:   spec.Meta{ID: "scenario-test", Title: "Scenario Test"},
 		Characters: []spec.Character{
-			{ID: "zack", Name: "Zack", Personality: "Grounded"},
-			{ID: "nelly", Name: "Nelly", Personality: "Considerate"},
+			{ID: "alice", Name: "Alice", Personality: "Grounded"},
+			{ID: "bob", Name: "Bob", Personality: "Considerate"},
 		},
 		Entities: []spec.Entity{
 			{
-				ID:    "living-room",
+				ID:    "room-a",
 				Kind:  "space",
-				Name:  "Living Room",
+				Name:  "Room A",
 				Space: &spec.SpaceBlock{Enterable: true, Open: true},
 			},
 			{
-				ID:       "zack-body",
+				ID:       "actor-a",
 				Kind:     "actor",
-				Name:     "Zack",
-				ParentID: "living-room",
+				Name:     "Alice Body",
+				ParentID: "room-a",
 				Link:     &spec.Link{Relation: "in"},
-				Actor:    &spec.ActorBlock{CharacterID: "zack"},
+				Actor:    &spec.ActorBlock{CharacterID: "alice"},
 				Attributes: []spec.Attribute{
-					{Key: "arousal", Value: "normal", Visibility: "private", Accessors: []string{"zack-body"}},
+					{Key: "arousal", Value: "normal", Visibility: "private", Accessors: []string{"actor-a"}},
 				},
 			},
 		},
 		Minds: []spec.Mind{
 			{
-				OwnerID: "zack",
+				OwnerID: "alice",
 				Subjects: []spec.Subject{
 					{
-						ID:     "nelly",
+						ID:     "bob",
 						Kind:   "person",
-						Names:  []string{"Nelly"},
+						Names:  []string{"Bob"},
 						Origin: "authored",
 						Bindings: []spec.Binding{
 							{EntityID: "non-existent-world-entity", Mode: "identity", Confidence: 1.0},
 						},
 					},
 					{
-						ID:     "living-room",
+						ID:     "room-a",
 						Kind:   "place",
-						Names:  []string{"Living Room"},
+						Names:  []string{"Room A"},
 						Origin: "authored",
 					},
 				},
 				Episodes: []spec.Episode{
 					{
-						ID:             "ep-zack-1",
+						ID:             "ep-alice-1",
 						Start:          "2026-10-16T18:00:00Z",
 						End:            "2026-10-16T18:20:00Z",
 						Title:          "First Meeting",
 						Summary:        "A quiet first meeting.",
-						PlaceIDs:       []string{"living-room"},
-						ParticipantIDs: []string{"nelly"},
+						PlaceIDs:       []string{"room-a"},
+						ParticipantIDs: []string{"bob"},
 						Importance:     0.8,
 						Beats: []spec.Beat{
-							{Text: "We stood on the wooden floor.", SubjectIDs: []string{"nelly"}},
+							{Text: "We stood on the wooden floor.", SubjectIDs: []string{"bob"}},
 						},
 					},
 				},
 				Dossiers: []spec.Dossier{
 					{
-						SubjectID: "nelly",
+						SubjectID: "bob",
 						Claims: []spec.Claim{
 							{
-								ID:         "c-zack-1",
+								ID:         "c-alice-1",
 								Kind:       "belief",
-								Content:    "Nelly is anxious.",
+								Content:    "Bob is calm.",
 								Salience:   0.8,
 								Conviction: 0.9,
-								Evidence:   []string{"ep-zack-1"},
+								Evidence:   []string{"ep-alice-1"},
 							},
 						},
 					},
@@ -90,12 +92,12 @@ func validTestDocument() spec.Document {
 				ID:       "start-opening",
 				Name:     "Opening Scene",
 				Clock:    spec.Clock{Cycle: 1, StartAt: "2026-10-16T18:35:00Z", TickSeconds: 20},
-				PlayerID: "zack-body",
+				PlayerID: "actor-a",
 				Events: []spec.EventSchedule{
 					{
 						ID:         "ev-open",
 						Tick:       1,
-						LocationID: "living-room",
+						LocationID: "room-a",
 						Text:       "You arrive at the doorway.",
 					},
 				},
@@ -136,7 +138,7 @@ func TestValidateNestedEnterableSpaceRejected(t *testing.T) {
 		ID:       "kitchen",
 		Kind:     "space",
 		Name:     "Kitchen",
-		ParentID: "living-room",
+		ParentID: "room-a",
 		Space:    &spec.SpaceBlock{Enterable: true, Open: true},
 	})
 	rep := Validate(&doc, "")
@@ -202,5 +204,32 @@ func TestValidateNoTick1EventRejected(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected NO_TICK1_EVENT error")
+	}
+}
+
+func TestNoScenarioSpecificContentInPackageScenario(t *testing.T) {
+	files, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("failed reading pkg/scenario directory: %v", err)
+	}
+
+	scenarioTerms := []string{"accidental_arrangement", "accidental-arrangement", "zack", "nelly", "mia"}
+
+	for _, fi := range files {
+		if !strings.HasSuffix(fi.Name(), ".go") || fi.Name() == "validate_test.go" {
+			continue // skip directory entries and this test file itself
+		}
+
+		content, err := os.ReadFile(fi.Name())
+		if err != nil {
+			t.Fatalf("failed reading file %s: %v", fi.Name(), err)
+		}
+
+		lower := strings.ToLower(string(content))
+		for _, term := range scenarioTerms {
+			if strings.Contains(lower, term) {
+				t.Fatalf("acceptance criterion violated: found scenario-specific term %q in pkg/scenario/%s", term, fi.Name())
+			}
+		}
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"omnia.adityagupta.dev/internal/env"
+	"omnia.adityagupta.dev/pkg/llm"
 	"omnia.adityagupta.dev/pkg/scenario"
 	"omnia.adityagupta.dev/pkg/sim"
 )
@@ -18,15 +20,55 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP server listen address (e.g. :8080 or 127.0.0.1:8080)")
 	maxTicks := flag.Int("ticks", 10, "Maximum number of ticks to simulate")
+	scenarioPath := flag.String("scenario", "scenarios/accidental_arrangement.omnia.json", "Path to scenario JSON specification")
+	startID := flag.String("start", "", "Specific start point ID (empty uses first start)")
+	playerID := flag.String("player", "", "Character ID for player (empty uses authored default)")
 	flag.Parse()
 
-	sc, err := scenario.Setup(true)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error setting up scenario: %v\n", err)
+	env.LoadDotEnv(".env")
+
+	apiKey := os.Getenv("OMNIA_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		fmt.Fprintf(os.Stderr, "Error: OMNIA_API_KEY (or OPENAI_API_KEY) must be set in environment or .env file\n")
 		os.Exit(1)
 	}
 
-	httpServer := sim.NewHTTPServer(sc.World, sc.HumanCtrl, *addr)
+	apiURL := os.Getenv("OMNIA_API_URL")
+	if apiURL == "" {
+		apiURL = "https://ai.adityagupta.dev/v1"
+	}
+	model := "gemini-3.5-flash-lite"
+	client := llm.NewHTTPClient(apiURL, apiKey)
+
+	f, err := os.Open(*scenarioPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening scenario file %q: %v\n", *scenarioPath, err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	doc, err := scenario.Decode(f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding scenario %q: %v\n", *scenarioPath, err)
+		os.Exit(1)
+	}
+
+	inst, err := scenario.Build(doc, scenario.BuildOptions{
+		Client:      client,
+		Model:       model,
+		Start:       *startID,
+		Player:      *playerID,
+		Interactive: true,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error building scenario instance: %v\n", err)
+		os.Exit(1)
+	}
+
+	httpServer := sim.NewHTTPServer(inst.World, inst.HumanCtrl, *addr)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -53,12 +95,27 @@ func main() {
 		listenAddr = "http://" + listenAddr
 	}
 
+	playerLocName := "Unknown"
+	if playerEnt, ok := inst.World.Entities[inst.Player]; ok {
+		if loc, ok := inst.World.Entities[playerEnt.Parent]; ok {
+			playerLocName = loc.Name
+		}
+	}
+
+	var coStarNames []string
+	for aID, a := range inst.Actors {
+		if aID != inst.Player {
+			coStarNames = append(coStarNames, a.Profile.Name)
+		}
+	}
+
 	fmt.Println("==================================================")
 	fmt.Println("   OMNIA HTTP INTERACTIVE PLAY SERVER             ")
 	fmt.Println("==================================================")
-	fmt.Printf("Scenario:  Accidental Arrangement\n")
-	fmt.Printf("Player:    Zack (Controlled via HTTP API)\n")
-	fmt.Printf("Co-Stars:  Nelly, Mia\n")
+	fmt.Printf("Scenario:  %s\n", inst.Doc.Meta.Title)
+	fmt.Printf("Setting:   %s\n", playerLocName)
+	fmt.Printf("Player:    %s (Controlled via HTTP API)\n", inst.Player)
+	fmt.Printf("Co-Stars:  %s\n", strings.Join(coStarNames, ", "))
 	fmt.Printf("URL:       %s\n", listenAddr)
 	fmt.Println("--------------------------------------------------")
 	fmt.Println("API Endpoints:")
@@ -80,7 +137,7 @@ func main() {
 	simCtx, simCancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer simCancel()
 
-	_, simErr := sc.World.Run(simCtx, *maxTicks, func(report sim.TickReport) {
+	_, simErr := inst.World.Run(simCtx, *maxTicks, func(report sim.TickReport) {
 		httpServer.OnTickReport(report)
 
 		targetsInfo := ""
@@ -88,9 +145,9 @@ func main() {
 			targetsInfo = fmt.Sprintf(" -> [%s]", strings.Join(report.Reaction.Action.Targets, ", "))
 		}
 
-		if report.ActorID == "zack" {
-			fmt.Printf("\n[Player Action (Zack)] (%s%s): %s\n",
-				report.Reaction.Action.Type, targetsInfo, report.Reaction.Action.Action)
+		if report.ActorID == inst.Player {
+			fmt.Printf("\n[Player Action (%s)] (%s%s): %s\n",
+				inst.Player, report.Reaction.Action.Type, targetsInfo, report.Reaction.Action.Action)
 			if report.SceneRuling != nil {
 				fmt.Printf("[Scene Resolution (%s)]: %s\n",
 					report.SceneRuling.SceneID, report.SceneRuling.Resolution)
@@ -112,25 +169,13 @@ func main() {
 			fmt.Printf("\n--- Scene Arbiter Ruling (%s) ---\nResolution:   %s\n",
 				report.SceneRuling.SceneID, report.SceneRuling.Resolution)
 		}
+
 		fmt.Printf("\nTurn Metrics: %v | %d tokens\n",
 			report.Reaction.Duration.Round(time.Millisecond), report.Reaction.Usage.TotalTokens)
 		fmt.Println("--------------------------------------------------")
 	})
 
-	httpServer.SetGameOver(simErr)
-
-	if simErr != nil && !errors.Is(simErr, sim.ErrQuit) && !errors.Is(simErr, context.Canceled) {
+	if simErr != nil && !errors.Is(simErr, sim.ErrQuit) {
 		fmt.Printf("Simulation ended with error: %v\n", simErr)
-	} else {
-		fmt.Println("\nSimulation run complete.")
-	}
-
-	// Print Event Log summary
-	fmt.Println("\n==================================================")
-	fmt.Println("               SIMULATION EVENT LOG               ")
-	fmt.Println("==================================================")
-	for i, ev := range sc.World.GetEventLog() {
-		fmt.Printf("[%d] Tick %d | Kind: %-7s | Source: %-15s | Loc: %s\n    %s\n",
-			i+1, ev.Tick, ev.Kind, ev.SourceName, ev.LocationID, ev.Description)
 	}
 }

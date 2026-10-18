@@ -10,26 +10,68 @@ import (
 	"strings"
 	"time"
 
+	"omnia.adityagupta.dev/internal/env"
+	"omnia.adityagupta.dev/pkg/llm"
 	"omnia.adityagupta.dev/pkg/scenario"
 	"omnia.adityagupta.dev/pkg/sim"
 )
 
 func main() {
-	playMode := flag.Bool("play", true, "Play interactively as Zack via terminal (defaults to true)")
+	playMode := flag.Bool("play", true, "Play interactively as player via terminal (defaults to true)")
 	httpAddr := flag.String("http", "", "HTTP listen address for interactive play mode (e.g. :8080 or 127.0.0.1:8080)")
 	maxTicks := flag.Int("ticks", 4, "Maximum number of ticks to simulate")
+	scenarioPath := flag.String("scenario", "scenarios/accidental_arrangement.omnia.json", "Path to scenario JSON specification")
+	startID := flag.String("start", "", "Specific start point ID (empty uses first start)")
+	playerID := flag.String("player", "", "Character ID for player (empty uses authored default)")
 	flag.Parse()
 
-	isInteractive := *playMode || *httpAddr != ""
-	sc, err := scenario.Setup(isInteractive)
+	env.LoadDotEnv(".env")
+
+	apiKey := os.Getenv("OMNIA_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("OPENAI_API_KEY")
+	}
+	if apiKey == "" {
+		fmt.Fprintf(os.Stderr, "Error: OMNIA_API_KEY (or OPENAI_API_KEY) must be set in environment or .env file\n")
+		os.Exit(1)
+	}
+
+	apiURL := os.Getenv("OMNIA_API_URL")
+	if apiURL == "" {
+		apiURL = "https://ai.adityagupta.dev/v1"
+	}
+	model := "gemini-3.5-flash-lite"
+	client := llm.NewHTTPClient(apiURL, apiKey)
+
+	f, err := os.Open(*scenarioPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing scenario: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error opening scenario file %q: %v\n", *scenarioPath, err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	doc, err := scenario.Decode(f)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding scenario %q: %v\n", *scenarioPath, err)
+		os.Exit(1)
+	}
+
+	isInteractive := *playMode || *httpAddr != ""
+	inst, err := scenario.Build(doc, scenario.BuildOptions{
+		Client:      client,
+		Model:       model,
+		Start:       *startID,
+		Player:      *playerID,
+		Interactive: isInteractive,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error building scenario instance: %v\n", err)
 		os.Exit(1)
 	}
 
 	var httpServer *sim.HTTPServer
 	if *httpAddr != "" {
-		httpServer = sim.NewHTTPServer(sc.World, sc.HumanCtrl, *httpAddr)
+		httpServer = sim.NewHTTPServer(inst.World, inst.HumanCtrl, *httpAddr)
 		if err := httpServer.Start(context.Background()); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to start HTTP server: %v\n", err)
 			os.Exit(1)
@@ -39,11 +81,11 @@ func main() {
 			listenAddr = "http://127.0.0.1" + listenAddr
 		}
 		fmt.Printf("\n[HTTP Server Online] Endpoints active at %s (/turn, /action, /status, /events)\n", listenAddr)
-	} else if *playMode {
+	} else if *playMode && inst.HumanCtrl != nil {
 		// Terminal TTY Play Mode: scan standard input
 		go func() {
 			scanner := bufio.NewScanner(os.Stdin)
-			for turn := range sc.HumanCtrl.Turns() {
+			for turn := range inst.HumanCtrl.Turns() {
 				fmt.Println("\n==================================================")
 				fmt.Printf(">>> YOUR TURN: %s [%s] <<<\n", turn.ActorName, turn.Timestamp)
 				fmt.Println("==================================================")
@@ -54,31 +96,41 @@ func main() {
 				fmt.Println(turn.Stimulus)
 				fmt.Print("\nWhat do you say or do? (type your action/speech or 'quit')\n> ")
 				if !scanner.Scan() {
-					sc.HumanCtrl.Quit()
+					inst.HumanCtrl.Quit()
 					return
 				}
 				input := strings.TrimSpace(scanner.Text())
 				if input == "quit" || input == "exit" {
-					sc.HumanCtrl.Quit()
+					inst.HumanCtrl.Quit()
 					return
 				}
-				sc.HumanCtrl.Reply(input)
+				inst.HumanCtrl.Reply(input)
 			}
 		}()
 	}
 
 	// 5. Verification & Opening Scene Setup
-	fmt.Println("==================================================")
-	fmt.Println("   SCENARIO: ACCIDENTAL ARRANGEMENT (SLICE OF LIFE) ")
-	fmt.Println("==================================================")
-	settingName := sc.LivingRoom.Name
-	if sc.Locations != nil && sc.Locations.Breezeway3F != nil {
-		settingName = sc.Locations.Breezeway3F.Name
+	playerLocName := "Unknown"
+	if playerEnt, ok := inst.World.Entities[inst.Player]; ok {
+		if loc, ok := inst.World.Entities[playerEnt.Parent]; ok {
+			playerLocName = loc.Name
+		}
 	}
-	fmt.Printf("Setting:   %s\n", settingName)
-	fmt.Printf("Player:    %s\n", sc.ZackMind.Profile.Name)
-	fmt.Printf("Co-Stars:  %s, %s\n", sc.NellyMind.Profile.Name, sc.MiaMind.Profile.Name)
-	fmt.Printf("Clock:     %s\n", sc.World.Clock)
+
+	var coStarNames []string
+	for aID, a := range inst.Actors {
+		if aID != inst.Player {
+			coStarNames = append(coStarNames, a.Profile.Name)
+		}
+	}
+
+	fmt.Println("==================================================")
+	fmt.Printf("   SCENARIO: %s\n", strings.ToUpper(inst.Doc.Meta.Title))
+	fmt.Println("==================================================")
+	fmt.Printf("Setting:   %s\n", playerLocName)
+	fmt.Printf("Player:    %s\n", inst.Player)
+	fmt.Printf("Co-Stars:  %s\n", strings.Join(coStarNames, ", "))
+	fmt.Printf("Clock:     %s\n", inst.World.Clock)
 
 	// 6. Run the Simulation Loop
 	ctxTimeout := 180 * time.Second
@@ -92,26 +144,24 @@ func main() {
 	if *httpAddr != "" {
 		fmt.Println("       INTERACTIVE HTTP MODE: CONTROL VIA CURL    ")
 	} else if *playMode {
-		fmt.Println("       INTERACTIVE MODE: YOU ARE PLAYING ZACK     ")
+		fmt.Printf("       INTERACTIVE MODE: YOU ARE PLAYING %s\n", inst.Player)
 	} else {
 		fmt.Println("       AUTONOMOUS DEMONSTRATION MODE              ")
 	}
 	fmt.Println("==================================================")
 
-	_, simErr := sc.World.Run(ctx, *maxTicks, func(report sim.TickReport) {
-		if httpServer != nil {
-			httpServer.OnTickReport(report)
-		}
-
+	_, simErr := inst.World.Run(ctx, *maxTicks, func(report sim.TickReport) {
 		targetsInfo := ""
 		if len(report.Reaction.Action.Targets) > 0 {
 			targetsInfo = fmt.Sprintf(" -> [%s]", strings.Join(report.Reaction.Action.Targets, ", "))
 		}
 
-		if isInteractive && report.ActorID == "zack" {
-			fmt.Printf("\n[Your Action] (%s%s): %s\n", report.Reaction.Action.Type, targetsInfo, report.Reaction.Action.Action)
+		if *httpAddr != "" && report.ActorID == inst.Player {
+			fmt.Printf("\n[Player Action (%s)] (%s%s): %s\n",
+				inst.Player, report.Reaction.Action.Type, targetsInfo, report.Reaction.Action.Action)
 			if report.SceneRuling != nil {
-				fmt.Printf("[Scene Resolution (%s)]: %s\n", report.SceneRuling.SceneID, report.SceneRuling.Resolution)
+				fmt.Printf("[Scene Resolution (%s)]: %s\n",
+					report.SceneRuling.SceneID, report.SceneRuling.Resolution)
 			}
 			return
 		}
@@ -180,7 +230,7 @@ func main() {
 	fmt.Println("\n==================================================")
 	fmt.Println("               SIMULATION EVENT LOG               ")
 	fmt.Println("==================================================")
-	for i, ev := range sc.World.GetEventLog() {
+	for i, ev := range inst.World.GetEventLog() {
 		fmt.Printf("[%d] Tick %d | Kind: %-7s | Source: %-15s | Loc: %s\n    %s\n",
 			i+1, ev.Tick, ev.Kind, ev.SourceName, ev.LocationID, ev.Description)
 	}
@@ -189,11 +239,11 @@ func main() {
 	fmt.Println("\n==================================================")
 	fmt.Println("           NELLY'S EVOLVED DOSSIERS & CLAIMS      ")
 	fmt.Println("==================================================")
-	if sc.NellyMind.Mind != nil {
-		for _, d := range sc.NellyMind.Mind.DossiersSnapshot() {
+	if nellyActor, ok := inst.Actors["nelly"]; ok && nellyActor.Mind != nil {
+		for _, d := range nellyActor.Mind.DossiersSnapshot() {
 			if len(d.Claims) > 0 || d.Impression != "" {
 				subjName := d.SubjectID
-				if s, ok := sc.NellyMind.Mind.GetSubject(d.SubjectID); ok && len(s.Names) > 0 {
+				if s, ok := nellyActor.Mind.GetSubject(d.SubjectID); ok && len(s.Names) > 0 {
 					subjName = s.Names[0]
 				}
 				fmt.Printf("\n[Subject: %s (%s)]\n", subjName, d.SubjectID)
@@ -204,14 +254,6 @@ func main() {
 					fmt.Printf("  - [%-9s | salience: %.2f | conf: %.2f] %s\n", c.Kind, c.Salience, c.Conviction, c.Content)
 				}
 			}
-		}
-	} else {
-		for _, th := range sc.NellyMind.ThoughtsSnapshot() {
-			linksStr := ""
-			if len(th.Links) > 0 {
-				linksStr = fmt.Sprintf(" [links: %s]", strings.Join(th.Links, ", "))
-			}
-			fmt.Printf("- [%s:%-9s | salience: %.2f] %s%s\n", th.ID, th.Kind, th.Salience, th.Content, linksStr)
 		}
 	}
 }

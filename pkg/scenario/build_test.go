@@ -14,11 +14,11 @@ func TestBuildSimulationInstance(t *testing.T) {
 	// Add an item and a portal to the test document to exercise all builders
 	doc.Entities = append(doc.Entities,
 		specEntity("balcony", "space", "Balcony", "", specSpace(true, false)),
-		specEntity("door-balcony", "portal", "Balcony Door", "living-room", nil),
-		specEntity("coffee-table", "item", "Coffee Table", "living-room", nil),
+		specEntity("door-balcony", "portal", "Balcony Door", "room-a", nil),
+		specEntity("coffee-table", "item", "Coffee Table", "room-a", nil),
 	)
 	doc.Entities[len(doc.Entities)-2].Portal = &spec.PortalBlock{
-		FromID: "living-room",
+		FromID: "room-a",
 		ToID:   "balcony",
 		Closed: true,
 		Locked: true,
@@ -26,7 +26,7 @@ func TestBuildSimulationInstance(t *testing.T) {
 
 	inst, err := Build(&doc, BuildOptions{
 		Interactive: true,
-		Player:      "zack-body",
+		Player:      "actor-a",
 	})
 	if err != nil {
 		t.Fatalf("expected clean build, got error: %v", err)
@@ -38,54 +38,54 @@ func TestBuildSimulationInstance(t *testing.T) {
 	}
 
 	// 2. Verify Entity Tree & Portals
-	livingRoom := inst.World.Entities["living-room"]
+	roomA := inst.World.Entities["room-a"]
 	door := inst.World.Entities["door-balcony"]
-	zackBody := inst.World.Entities["zack-body"]
+	actorA := inst.World.Entities["actor-a"]
 
-	if livingRoom == nil || livingRoom.Space == nil || !livingRoom.Space.Enterable {
-		t.Fatalf("expected enterable living room space")
+	if roomA == nil || roomA.Space == nil || !roomA.Space.Enterable {
+		t.Fatalf("expected enterable room-a space")
 	}
 	if door == nil || door.Portal == nil || !door.Portal.Closed || !door.Portal.Locked {
 		t.Fatalf("expected closed & locked portal")
 	}
-	if zackBody == nil || zackBody.Parent != "living-room" {
-		t.Fatalf("expected zack-body inside living-room")
+	if actorA == nil || actorA.Parent != "room-a" {
+		t.Fatalf("expected actor-a inside room-a")
 	}
 
 	// 3. Verify Actor Mind Seeding & Derived Links
-	zackActor := inst.Actors["zack-body"]
-	if zackActor == nil || zackActor.Mind == nil {
-		t.Fatalf("expected zack actor and mind to exist")
+	aliceActor := inst.Actors["actor-a"]
+	if aliceActor == nil || aliceActor.Mind == nil {
+		t.Fatalf("expected alice actor and mind to exist")
 	}
 
 	// Check Dossier and Episode link
-	doss, ok := zackActor.Mind.GetDossier("nelly")
+	doss, ok := aliceActor.Mind.GetDossier("bob")
 	if !ok || len(doss.Claims) != 1 {
-		t.Fatalf("expected nelly dossier with 1 claim, got: %+v", doss)
+		t.Fatalf("expected bob dossier with 1 claim, got: %+v", doss)
 	}
 	if len(doss.Links) == 0 {
-		t.Fatalf("expected derived episode link in nelly dossier, got 0 links")
+		t.Fatalf("expected derived episode link in bob dossier, got 0 links")
 	}
-	if doss.Links[0].EpisodeID != "ep-zack-1" {
-		t.Fatalf("expected link to ep-zack-1, got %s", doss.Links[0].EpisodeID)
+	if doss.Links[0].EpisodeID != "ep-alice-1" {
+		t.Fatalf("expected link to ep-alice-1, got %s", doss.Links[0].EpisodeID)
 	}
 
-	// Check graph recall works on mention of "Nelly"
-	recall := zackActor.Mind.Recall(memory.RecallCues{
-		Mentions:    []string{"Nelly"},
+	// Check graph recall works on mention of "Bob"
+	recall := aliceActor.Mind.Recall(memory.RecallCues{
+		Mentions:    []string{"Bob"},
 		CurrentTick: 1,
 		CurrentTime: time.Date(2026, 10, 16, 18, 35, 0, 0, time.UTC),
 	})
-	if len(recall.SurfacedEpisodes) == 0 || recall.SurfacedEpisodes[0].ID != "ep-zack-1" {
-		t.Fatalf("expected recall on mention 'Nelly' to surface ep-zack-1, got: %+v", recall.SurfacedEpisodes)
+	if len(recall.SurfacedEpisodes) == 0 || recall.SurfacedEpisodes[0].ID != "ep-alice-1" {
+		t.Fatalf("expected recall on mention 'Bob' to surface ep-alice-1, got: %+v", recall.SurfacedEpisodes)
 	}
 
 	// 4. Verify Interactive Human Controller
 	if inst.HumanCtrl == nil {
 		t.Fatalf("expected HumanController to be attached for interactive player")
 	}
-	if inst.Player != "zack-body" {
-		t.Fatalf("expected player entity to be zack-body, got %s", inst.Player)
+	if inst.Player != "actor-a" {
+		t.Fatalf("expected player entity to be actor-a, got %s", inst.Player)
 	}
 }
 

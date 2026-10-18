@@ -61,37 +61,47 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 		add("/meta/id", doc.Meta.ID, SeverityError, "INVALID_SLUG", "meta.id must be a slug: ^[a-z0-9][a-z0-9_-]{0,63}$")
 	}
 
-	worldIDs := make(map[string]string) // id -> pointer
-	checkWorldID := func(id, pointer, kind string) {
+	checkSlug := func(id, pointer, kind string) bool {
 		if id == "" {
 			add(pointer, "", SeverityError, "MISSING_ID", fmt.Sprintf("%s id cannot be empty", kind))
-			return
+			return false
 		}
 		if !slugRegex.MatchString(id) {
 			add(pointer, id, SeverityError, "INVALID_SLUG", fmt.Sprintf("%s id %q must be a slug", kind, id))
+			return false
 		}
-		if prev, exists := worldIDs[id]; exists {
-			add(pointer, id, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate world-scope ID %q (previously declared at %s)", id, prev))
-		} else {
-			worldIDs[id] = pointer
-		}
+		return true
 	}
 
 	charMap := make(map[string]spec.Character)
+	charIDs := make(map[string]string)
 	for i, c := range doc.Characters {
 		ptr := fmt.Sprintf("/characters/%d", i)
-		checkWorldID(c.ID, ptr+"/id", "character")
+		if checkSlug(c.ID, ptr+"/id", "character") {
+			if prev, exists := charIDs[c.ID]; exists {
+				add(ptr+"/id", c.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate character ID %q (previously declared at %s)", c.ID, prev))
+			} else {
+				charIDs[c.ID] = ptr
+			}
+		}
 		charMap[c.ID] = c
 	}
 
 	entityMap := make(map[string]spec.Entity)
+	entityIDs := make(map[string]string)
 	actorEntities := make(map[string]bool)
 	spaceEntities := make(map[string]bool)
 	portalEntities := make(map[string]bool)
 
 	for i, e := range doc.Entities {
 		ptr := fmt.Sprintf("/entities/%d", i)
-		checkWorldID(e.ID, ptr+"/id", "entity")
+		if checkSlug(e.ID, ptr+"/id", "entity") {
+			if prev, exists := entityIDs[e.ID]; exists {
+				add(ptr+"/id", e.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate entity ID %q (previously declared at %s)", e.ID, prev))
+			} else {
+				entityIDs[e.ID] = ptr
+			}
+		}
 		entityMap[e.ID] = e
 
 		if e.Salience < 0 || e.Salience > 1.0 {
@@ -189,9 +199,16 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 	}
 
 	// 3. History Validation
+	historyIDs := make(map[string]string)
 	for i, h := range doc.History {
 		ptr := fmt.Sprintf("/history/%d", i)
-		checkWorldID(h.ID, ptr+"/id", "history")
+		if checkSlug(h.ID, ptr+"/id", "history") {
+			if prev, exists := historyIDs[h.ID]; exists {
+				add(ptr+"/id", h.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate history ID %q (previously declared at %s)", h.ID, prev))
+			} else {
+				historyIDs[h.ID] = ptr
+			}
+		}
 		if h.LocationID != "" && !spaceEntities[h.LocationID] {
 			add(ptr+"/location_id", h.ID, SeverityError, "UNKNOWN_SPACE", fmt.Sprintf("history event location %q not found", h.LocationID))
 		}
@@ -335,9 +352,16 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 	}
 
 	startMap := make(map[string]spec.Start)
+	startIDs := make(map[string]string)
 	for i, st := range doc.Starts {
 		sPtr := fmt.Sprintf("/starts/%d", i)
-		checkWorldID(st.ID, sPtr+"/id", "start")
+		if checkSlug(st.ID, sPtr+"/id", "start") {
+			if prev, exists := startIDs[st.ID]; exists {
+				add(sPtr+"/id", st.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate start ID %q (previously declared at %s)", st.ID, prev))
+			} else {
+				startIDs[st.ID] = sPtr
+			}
+		}
 		startMap[st.ID] = st
 
 		if st.Clock.TickSeconds <= 0 {
@@ -358,9 +382,16 @@ func Validate(doc *spec.Document, startID string) ValidationReport {
 		}
 
 		// Check initial events
+		eventIDs := make(map[string]string)
 		for j, ev := range st.Events {
 			ePtr := fmt.Sprintf("%s/events/%d", sPtr, j)
-			checkWorldID(ev.ID, ePtr+"/id", "event")
+			if checkSlug(ev.ID, ePtr+"/id", "event") {
+				if prev, exists := eventIDs[ev.ID]; exists {
+					add(ePtr+"/id", ev.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate event ID %q in start %s (previously declared at %s)", ev.ID, st.ID, prev))
+				} else {
+					eventIDs[ev.ID] = ePtr
+				}
+			}
 			if ev.Tick < 1 {
 				add(ePtr+"/tick", ev.ID, SeverityError, "INVALID_TICK", "event tick must be >= 1")
 			}
