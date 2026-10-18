@@ -81,10 +81,11 @@ type Simulation struct {
 	lastTargets map[EntityID][]EntityID // actorID -> actors who targeted them last tick
 
 	// Thought Distillation & Memory Consolidation
-	Distiller      ThoughtDistiller
-	Consolidator   Consolidator
-	pendingDistill map[EntityID]chan DistillResult
-	lastDistill    map[EntityID]*DistillResult
+	Distiller       ThoughtDistiller
+	Consolidator    Consolidator
+	consolidationWG sync.WaitGroup
+	pendingDistill  map[EntityID]chan DistillResult
+	lastDistill     map[EntityID]*DistillResult
 
 	// Event Log & Loop State
 	EventLog        []Event              // Canonical objective history
@@ -1017,7 +1018,9 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 						IsSceneClose:        false,
 						AvailableSubjectIDs: availSubjIDs,
 					}
+					s.consolidationWG.Add(1)
 					go func(mind *actor.Actor, in ConsolidateInput, j memory.ConsolidateJob) {
+						defer s.consolidationWG.Done()
 						cRes, cErr := s.Consolidator.Consolidate(ctx, in)
 						if cErr == nil {
 							mind.Mind.FinishConsolidation(j, cRes.Beats)
@@ -1060,11 +1063,18 @@ func (s *Simulation) WaitDistills() {
 	}
 }
 
+// WaitConsolidations blocks until all background consolidation tasks have committed.
+func (s *Simulation) WaitConsolidations() {
+	s.consolidationWG.Wait()
+}
+
 // Run executes the simulation loop for up to maxTicks, or until the scene reaches steady state.
 func (s *Simulation) Run(ctx context.Context, maxTicks int, onTick func(report TickReport)) ([]TickReport, error) {
 	defer func() {
 		s.WaitDistills()
-		s.CloseAllEpisodes(context.Background())
+		s.WaitConsolidations()
+		s.CloseAllEpisodes(ctx)
+		s.WaitConsolidations()
 	}()
 	var allReports []TickReport
 
@@ -1102,12 +1112,18 @@ func (s *Simulation) Run(ctx context.Context, maxTicks int, onTick func(report T
 
 // CloseAllEpisodes closes open episodes across all actors and finalizes them.
 func (s *Simulation) CloseAllEpisodes(ctx context.Context) {
+	shutdownCtx := ctx
+	if shutdownCtx == nil || shutdownCtx.Err() != nil {
+		var cancel context.CancelFunc
+		shutdownCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+	}
+
 	type closeTask struct {
-		mind   *actor.Actor
-		epID   string
-		input  ConsolidateInput
-		buffer *memory.WorkingBuffer
-		toSeq  int64
+		mind  *actor.Actor
+		epID  string
+		input ConsolidateInput
+		toSeq int64
 	}
 
 	s.mu.Lock()
@@ -1118,8 +1134,7 @@ func (s *Simulation) CloseAllEpisodes(ctx context.Context) {
 			if openEpID != "" {
 				entity.Mind.Mind.CloseAllOpenEpisodes(s.Clock.TickCount, s.Clock.CurrentTime())
 				if s.Consolidator != nil {
-					buffer := entity.Mind.Mind.Buffer()
-					unconsolidated := buffer.UnconsolidatedTurns()
+					unconsolidated := entity.Mind.Mind.UnconsolidatedTurns()
 					loc, _ := s.whereLocked(entity.ID)
 					locID := ""
 					if loc != nil {
@@ -1135,10 +1150,9 @@ func (s *Simulation) CloseAllEpisodes(ctx context.Context) {
 						availSubjIDs = append(availSubjIDs, s.ID)
 					}
 					tasks = append(tasks, closeTask{
-						mind:   entity.Mind,
-						epID:   openEpID,
-						buffer: buffer,
-						toSeq:  toSeq,
+						mind:  entity.Mind,
+						epID:  openEpID,
+						toSeq: toSeq,
 						input: ConsolidateInput{
 							ActorID:             entity.ID,
 							ActorName:           entity.Name,
@@ -1160,14 +1174,14 @@ func (s *Simulation) CloseAllEpisodes(ctx context.Context) {
 
 	// Execute consolidations outside of s.mu.Lock()
 	for _, t := range tasks {
-		cRes, err := s.Consolidator.Consolidate(ctx, t.input)
-		if err == nil {
+		cRes, err := s.Consolidator.Consolidate(shutdownCtx, t.input)
+		if err == nil && len(cRes.Beats) > 0 {
 			for _, b := range cRes.Beats {
 				t.mind.Mind.AppendBeat(t.epID, b)
 			}
 			t.mind.Mind.FinalizeEpisodeClose(t.epID, cRes.Title, cRes.Summary, cRes.Tone, cRes.Importance, cRes.FormativeSubjectIDs)
 			if t.toSeq > 0 {
-				t.buffer.CommitConsolidation(t.toSeq)
+				t.mind.Mind.CommitConsolidation(t.toSeq)
 			}
 		}
 	}

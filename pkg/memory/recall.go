@@ -368,6 +368,17 @@ func ExecuteRecall(
 		ep.LastRecalledAt = cues.CurrentTime
 	}
 
+	// Produce detached deep-copies to prevent data races on read/write across goroutines
+	if res.SelfDossier != nil {
+		res.SelfDossier = res.SelfDossier.DeepCopy()
+	}
+	for i := range res.ActivatedDossiers {
+		res.ActivatedDossiers[i] = res.ActivatedDossiers[i].DeepCopy()
+	}
+	for i := range res.SurfacedEpisodes {
+		res.SurfacedEpisodes[i] = res.SurfacedEpisodes[i].DeepCopy()
+	}
+
 	return res
 }
 

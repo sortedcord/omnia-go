@@ -51,6 +51,23 @@ type Subject struct {
 	Origin   SubjectOrigin `json:"origin"`
 }
 
+// DeepCopy produces a thread-safe detached clone of a Subject.
+func (s *Subject) DeepCopy() *Subject {
+	if s == nil {
+		return nil
+	}
+	cp := *s
+	if len(s.Names) > 0 {
+		cp.Names = make([]string, len(s.Names))
+		copy(cp.Names, s.Names)
+	}
+	if len(s.Bindings) > 0 {
+		cp.Bindings = make([]Binding, len(s.Bindings))
+		copy(cp.Bindings, s.Bindings)
+	}
+	return &cp
+}
+
 // RecognitionResult packages the outcome of matching perception against subjective bindings.
 type RecognitionResult struct {
 	Recognized      map[string]float64 // subjectID -> confidence

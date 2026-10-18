@@ -70,6 +70,37 @@ type Episode struct {
 	LastRecalledAt   time.Time `json:"last_recalled_at,omitempty"`
 }
 
+// DeepCopy produces a thread-safe detached clone of an Episode.
+func (e *Episode) DeepCopy() *Episode {
+	if e == nil {
+		return nil
+	}
+	cp := *e
+	if len(e.PlaceIDs) > 0 {
+		cp.PlaceIDs = make([]string, len(e.PlaceIDs))
+		copy(cp.PlaceIDs, e.PlaceIDs)
+	}
+	if len(e.ParticipantIDs) > 0 {
+		cp.ParticipantIDs = make([]string, len(e.ParticipantIDs))
+		copy(cp.ParticipantIDs, e.ParticipantIDs)
+	}
+	if len(e.PerceivedIDs) > 0 {
+		cp.PerceivedIDs = make([]string, len(e.PerceivedIDs))
+		copy(cp.PerceivedIDs, e.PerceivedIDs)
+	}
+	if len(e.Beats) > 0 {
+		cp.Beats = make([]Beat, len(e.Beats))
+		for i, b := range e.Beats {
+			cp.Beats[i] = b
+			if len(b.SubjectIDs) > 0 {
+				cp.Beats[i].SubjectIDs = make([]string, len(b.SubjectIDs))
+				copy(cp.Beats[i].SubjectIDs, b.SubjectIDs)
+			}
+		}
+	}
+	return &cp
+}
+
 // FormatSummary formats an episode into a concise, evocative memory representation for prompt injection.
 func (e *Episode) FormatSummary() string {
 	dateStr := e.Start.Format("2006-01-02 15:04")

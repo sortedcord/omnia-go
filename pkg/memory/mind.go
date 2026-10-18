@@ -111,6 +111,48 @@ func (m *Mind) OpenEpisodeID() string {
 	return m.openEpisodeID
 }
 
+func (m *Mind) allocSubjectIDLocked() string {
+	for {
+		id := fmt.Sprintf("s-%s-%d", m.ownerID, m.nextSubjectSeq)
+		m.nextSubjectSeq++
+		if _, exists := m.subjects[id]; !exists {
+			return id
+		}
+	}
+}
+
+func (m *Mind) allocEpisodeIDLocked() string {
+	for {
+		id := fmt.Sprintf("ep-%s-%d", m.ownerID, m.nextEpisodeSeq)
+		m.nextEpisodeSeq++
+		if _, exists := m.episodes[id]; !exists {
+			return id
+		}
+	}
+}
+
+func (m *Mind) allocClaimIDLocked() string {
+	for {
+		id := fmt.Sprintf("c-%s-%d", m.ownerID, m.nextClaimSeq)
+		m.nextClaimSeq++
+		found := false
+		for _, d := range m.dossiers {
+			for _, c := range d.Claims {
+				if c.ID == id {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			return id
+		}
+	}
+}
+
 // RecordTurn appends an interaction turn to the working buffer and performs automatic percept recognition.
 func (m *Mind) RecordTurn(t Turn) int64 {
 	m.mu.Lock()
@@ -123,12 +165,50 @@ func (m *Mind) RecordTurn(t Turn) int64 {
 
 	// Mechanical: auto-register clearly perceived entities (LOD >= 2) into subject registry and dossiers
 	AutoRegisterPercepts(m.subjects, m.dossiers, t.Perceived, t.Tick, t.Time, func() string {
-		id := fmt.Sprintf("s-%s-%d", m.ownerID, m.nextSubjectSeq)
-		m.nextSubjectSeq++
-		return id
+		return m.allocSubjectIDLocked()
 	})
 
 	return seq
+}
+
+// FindOrCreateSubjectForEntity returns the subject registered for entityID, or creates one.
+func (m *Mind) FindOrCreateSubjectForEntity(entityID string, defaultKind SubjectKind) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.findOrCreateSubjectForEntityLocked(entityID, defaultKind)
+}
+
+func (m *Mind) findOrCreateSubjectForEntityLocked(entityID string, defaultKind SubjectKind) string {
+	for _, s := range m.subjects {
+		for _, b := range s.Bindings {
+			if b.EntityID == entityID && b.Mode == BindingIdentity {
+				return s.ID
+			}
+		}
+	}
+	if s, ok := m.subjects[entityID]; ok {
+		return s.ID
+	}
+
+	newID := m.allocSubjectIDLocked()
+	subj := &Subject{
+		ID:    newID,
+		Kind:  defaultKind,
+		Names: []string{entityID},
+		Bindings: []Binding{
+			{
+				EntityID:   entityID,
+				Mode:       BindingIdentity,
+				Confidence: 1.0,
+			},
+		},
+		Origin: OriginPerceived,
+	}
+	m.subjects[newID] = subj
+	if _, ok := m.dossiers[newID]; !ok {
+		m.dossiers[newID] = &Dossier{SubjectID: newID}
+	}
+	return newID
 }
 
 // EnsureOpenEpisode checks if the scene changed or if an episode needs to be opened.
@@ -145,7 +225,8 @@ func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTi
 			if curEp.SceneID == sceneID && timeGap <= 10*time.Minute {
 				curEp.End = inWorldTime
 				if locationID != "" {
-					curEp.PlaceIDs = addUniqueString(curEp.PlaceIDs, locationID)
+					placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, SubjectPlace)
+					curEp.PlaceIDs = addUniqueString(curEp.PlaceIDs, placeSubjID)
 				}
 				return curEp.ID, false
 			}
@@ -156,8 +237,7 @@ func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTi
 	}
 
 	// Open new episode
-	newID := fmt.Sprintf("ep-%s-%d", m.ownerID, m.nextEpisodeSeq)
-	m.nextEpisodeSeq++
+	newID := m.allocEpisodeIDLocked()
 
 	newEp := &Episode{
 		ID:         newID,
@@ -174,7 +254,8 @@ func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTi
 		Importance: 0.50,
 	}
 	if locationID != "" {
-		newEp.PlaceIDs = []string{locationID}
+		placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, SubjectPlace)
+		newEp.PlaceIDs = []string{placeSubjID}
 	}
 
 	m.episodes[newID] = newEp
@@ -188,20 +269,14 @@ func (m *Mind) closeEpisodeLocked(ep *Episode, tick int, inWorldTime time.Time) 
 
 	// Automatically link this episode to dossiers of recognized participants and places
 	for _, partID := range ep.ParticipantIDs {
-		d, ok := m.dossiers[partID]
-		if !ok {
-			d = &Dossier{SubjectID: partID}
-			m.dossiers[partID] = d
+		if d, ok := m.dossiers[partID]; ok {
+			d.AddLink(ep.ID, 0.50, RoleParticipant)
 		}
-		d.AddLink(ep.ID, 0.50, RoleParticipant)
 	}
 	for _, placeID := range ep.PlaceIDs {
-		d, ok := m.dossiers[placeID]
-		if !ok {
-			d = &Dossier{SubjectID: placeID}
-			m.dossiers[placeID] = d
+		if d, ok := m.dossiers[placeID]; ok {
+			d.AddLink(ep.ID, 0.50, RolePlace)
 		}
-		d.AddLink(ep.ID, 0.50, RolePlace)
 	}
 }
 
@@ -272,8 +347,7 @@ func (m *Mind) ApplyDossierOps(tick int, ops []DossierOp, inWorldTime time.Time)
 			}
 			id := op.SubjectID
 			if id == "" {
-				id = fmt.Sprintf("s-%s-%d", m.ownerID, m.nextSubjectSeq)
-				m.nextSubjectSeq++
+				id = m.allocSubjectIDLocked()
 			} else if _, exists := m.subjects[id]; exists {
 				rejected = append(rejected, fmt.Sprintf("new_subject: subject %q already exists", id))
 				continue
@@ -352,8 +426,7 @@ func (m *Mind) ApplyDossierOps(tick int, ops []DossierOp, inWorldTime time.Time)
 			}
 			// Allocate ClaimID if needed
 			if op.Op == "upsert_claim" && op.ClaimID == "" {
-				op.ClaimID = fmt.Sprintf("c-%s-%d", m.ownerID, m.nextClaimSeq)
-				m.nextClaimSeq++
+				op.ClaimID = m.allocClaimIDLocked()
 			}
 
 			if err := d.ApplyOp(tick, op, m.openEpisodeID); err != nil {
@@ -392,8 +465,7 @@ func (m *Mind) AddClaim(subjectID string, c Claim) {
 	}
 
 	if c.ID == "" {
-		c.ID = fmt.Sprintf("c-%s-%d", m.ownerID, m.nextClaimSeq)
-		m.nextClaimSeq++
+		c.ID = m.allocClaimIDLocked()
 	}
 
 	for i := range d.Claims {
@@ -456,6 +528,20 @@ func (m *Mind) CloseAllOpenEpisodes(tick int, inWorldTime time.Time) []string {
 		m.openEpisodeID = ""
 	}
 	return closed
+}
+
+// UnconsolidatedTurns returns uncommitted turns waiting for consolidation under lock.
+func (m *Mind) UnconsolidatedTurns() []Turn {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.buffer.UnconsolidatedTurns()
+}
+
+// CommitConsolidation advances the buffer watermark under lock.
+func (m *Mind) CommitConsolidation(toSeq int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.buffer.CommitConsolidation(toSeq)
 }
 
 // ConsolidateJob packages a chunk of turns ready for background consolidation.
@@ -569,50 +655,46 @@ func (m *Mind) GetDossier(subjectID string) (*Dossier, bool) {
 	return d, true
 }
 
-// DossiersSnapshot returns a copy of all dossiers.
+// DossiersSnapshot returns a deep copy of all dossiers.
 func (m *Mind) DossiersSnapshot() []*Dossier {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	res := make([]*Dossier, 0, len(m.dossiers))
 	for _, d := range m.dossiers {
-		cp := *d
-		res = append(res, &cp)
+		res = append(res, d.DeepCopy())
 	}
 	return res
 }
 
-// EpisodesSnapshot returns a copy of all episodes.
+// EpisodesSnapshot returns a deep copy of all episodes.
 func (m *Mind) EpisodesSnapshot() []*Episode {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	res := make([]*Episode, 0, len(m.episodes))
 	for _, ep := range m.episodes {
-		cp := *ep
-		res = append(res, &cp)
+		res = append(res, ep.DeepCopy())
 	}
 	return res
 }
 
-// SubjectsSnapshot returns a copy of all subjects.
+// SubjectsSnapshot returns a deep copy of all subjects.
 func (m *Mind) SubjectsSnapshot() []*Subject {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	res := make([]*Subject, 0, len(m.subjects))
 	for _, s := range m.subjects {
-		cp := *s
-		res = append(res, &cp)
+		res = append(res, s.DeepCopy())
 	}
 	return res
 }
 
-// SubjectsSnapshotMap returns a copy of all subjects keyed by ID.
+// SubjectsSnapshotMap returns a deep copy of all subjects keyed by ID.
 func (m *Mind) SubjectsSnapshotMap() map[string]*Subject {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	res := make(map[string]*Subject, len(m.subjects))
 	for k, v := range m.subjects {
-		cp := *v
-		res[k] = &cp
+		res[k] = v.DeepCopy()
 	}
 	return res
 }

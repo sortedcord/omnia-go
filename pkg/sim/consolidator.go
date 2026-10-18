@@ -66,6 +66,10 @@ func NewLLMConsolidator(client llm.Client, model string) *LLMConsolidator {
 
 // ConsolidatorSchema constructs the strict JSON schema for episode condensation.
 func ConsolidatorSchema(availableSubjectIDs []string) *llm.Schema {
+	if len(availableSubjectIDs) > 250 {
+		availableSubjectIDs = availableSubjectIDs[:250]
+	}
+
 	subjSchema := llm.Str("Subject ID")
 	if len(availableSubjectIDs) > 0 {
 		subjSchema = llm.Enum("Subject ID", availableSubjectIDs...)

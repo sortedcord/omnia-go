@@ -73,6 +73,13 @@ func NewLLMDistiller(client llm.Client, model string) *LLMDistiller {
 
 // DistillerSchema returns the strict JSON schema for subconscious thought and dossier distillation.
 func DistillerSchema(availableSubjectIDs []string, availableEntityIDs []string) *llm.Schema {
+	if len(availableSubjectIDs) > 250 {
+		availableSubjectIDs = availableSubjectIDs[:250]
+	}
+	if len(availableEntityIDs) > 250 {
+		availableEntityIDs = availableEntityIDs[:250]
+	}
+
 	subjSchema := llm.Str("Target subject ID")
 	if len(availableSubjectIDs) > 0 {
 		subjSchema = llm.Enum("Target subject ID", availableSubjectIDs...)

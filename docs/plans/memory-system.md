@@ -279,13 +279,13 @@ Recall runs every tick with no LLM call, entirely in subject space.
 
 ```
 cue(e)     = Σ selected dossiers d linking e:  activation(d) × link.weight
-access(e)  = max( (1 + Δhours/24)^-0.5 × (1 + 0.15·ln(1+recallCount)),  0.3 if importance ≥ 0.8 else 0 )
+access(e)  = max( (1 + Δhours/24)^-0.5 × (1 + 0.15·ln(1+recallCount)),  0.35 if importance ≥ 0.8 else 0 )
 context(e) = 0.5·Jaccard(e.participants, recognized subjects) + 0.5·[e.places ∩ (anchored ∪ current place subject) ≠ ∅]
 refract(e) = 0.5 if surfaced in the last 3 ticks with no new mention or expectation-miss cue, else 0
 score(e)   = cue × (0.4 + 0.6·importance) × access + 0.2·context − refract
 ```
 
-The open episode is excluded. Episodes scoring at least **θ = 0.35** are kept, up to the top 3, within budget. A score of 0.8 or more renders the beats (a vivid memory). Otherwise the title, when, where and summary are shown. Surfacing updates the recall bookkeeping. All constants live in a `RecallConfig`, and scoring is pure, so golden tests are possible.
+The open episode is excluded. Episodes scoring at least **θ = 0.25** are kept, up to the top 3, within budget. A score of 0.75 or more renders the beats (a vivid memory). Otherwise the title, when, where and summary are shown. Surfacing updates the recall bookkeeping. All constants live in a `RecallConfig`, and scoring is pure, so golden tests are possible.
 
 ### Step 3: assemble the prompt
 

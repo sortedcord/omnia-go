@@ -50,6 +50,20 @@ type Claim struct {
 	History    []Revision `json:"history,omitempty"` // Up to 5 prior versions
 }
 
+// DeepCopy produces a thread-safe detached clone of a Claim.
+func (c Claim) DeepCopy() Claim {
+	cp := c
+	if len(c.Evidence) > 0 {
+		cp.Evidence = make([]string, len(c.Evidence))
+		copy(cp.Evidence, c.Evidence)
+	}
+	if len(c.History) > 0 {
+		cp.History = make([]Revision, len(c.History))
+		copy(cp.History, c.History)
+	}
+	return cp
+}
+
 // EpisodeLink connects a dossier to an episodic memory that formed or confirmed its claims.
 type EpisodeLink struct {
 	EpisodeID string   `json:"episode_id"`
@@ -65,6 +79,31 @@ type Dossier struct {
 	ArchivedClaims []Claim       `json:"archived_claims,omitempty"` // Faded or retracted claims kept for introspection
 	Links          []EpisodeLink `json:"links,omitempty"`
 	Updated        int           `json:"updated_tick"`
+}
+
+// DeepCopy produces a thread-safe detached clone of a Dossier.
+func (d *Dossier) DeepCopy() *Dossier {
+	if d == nil {
+		return nil
+	}
+	cp := *d
+	if len(d.Claims) > 0 {
+		cp.Claims = make([]Claim, len(d.Claims))
+		for i, c := range d.Claims {
+			cp.Claims[i] = c.DeepCopy()
+		}
+	}
+	if len(d.ArchivedClaims) > 0 {
+		cp.ArchivedClaims = make([]Claim, len(d.ArchivedClaims))
+		for i, c := range d.ArchivedClaims {
+			cp.ArchivedClaims[i] = c.DeepCopy()
+		}
+	}
+	if len(d.Links) > 0 {
+		cp.Links = make([]EpisodeLink, len(d.Links))
+		copy(cp.Links, d.Links)
+	}
+	return &cp
 }
 
 // DecayClaims applies kind-specific temporal decay to claims based on elapsed in-world time.
