@@ -19,7 +19,7 @@ func SeedDossiers(zack, nelly, mia *actor.Actor) {
 		nelly.Mind.AddClaim("nelly", memory.Claim{
 			ID:         "c-nel-self-1",
 			Kind:       memory.ClaimIntention,
-			Content:    "Explain the arrangement to Zack so he understands the stakes, but stop sounding so formal and weird.",
+			Content:    "Try not to faint or sound completely insane when Mia brings this guy inside.",
 			Salience:   0.95,
 			Conviction: 0.85,
 			Formed:     1,
@@ -27,8 +27,8 @@ func SeedDossiers(zack, nelly, mia *actor.Actor) {
 		nelly.Mind.AddClaim("nelly", memory.Claim{
 			ID:         "c-nel-self-2",
 			Kind:       memory.ClaimFeeling,
-			Content:    "My cheeks feel like boiling radiators and my fingers are trembling inside my sleeves.",
-			Salience:   0.85,
+			Content:    "My heart is hammering at 125 bpm listening to footsteps and muffled voices outside the door.",
+			Salience:   0.88,
 			Conviction: 0.90,
 			Formed:     1,
 		})
@@ -193,8 +193,8 @@ func SeedDossiers(zack, nelly, mia *actor.Actor) {
 		nelly.Mind.AddClaim("mia", memory.Claim{
 			ID:         "c-nel-mia-2",
 			Kind:       memory.ClaimSuspicion,
-			Content:    "Mia is deliberately hiding in the kitchen on purpose to force Zack and me to talk.",
-			Salience:   0.80,
+			Content:    "Mia is outside the door right now briefing this guy; I pray she isn't making me sound completely unhinged.",
+			Salience:   0.82,
 			Conviction: 0.85,
 			Formed:     1,
 		})
@@ -208,7 +208,7 @@ func SeedDossiers(zack, nelly, mia *actor.Actor) {
 		zack.Mind.AddClaim("zack", memory.Claim{
 			ID:         "c-zk-self-1",
 			Kind:       memory.ClaimIntention,
-			Content:    "Figure out what Mia and Nelly actually expect me to do before I agree to anything crazy.",
+			Content:    "Find out what impossible scheme Mia has cooked up before she talks me into stepping through that door.",
 			Salience:   0.92,
 			Conviction: 0.85,
 			Formed:     1,
@@ -236,7 +236,7 @@ func SeedDossiers(zack, nelly, mia *actor.Actor) {
 		zack.Mind.AddClaim("zack", memory.Claim{
 			ID:         "c-zk-self-4",
 			Kind:       memory.ClaimIntention,
-			Content:    "Use a bit of dry humor to lower the temperature in the room and get Nelly talking normally.",
+			Content:    "Hear Mia out outside the door, but keep my guard up—I'm not agreeing to anything fraudulent or humiliating.",
 			Salience:   0.85,
 			Conviction: 0.80,
 			Formed:     1,
@@ -313,8 +313,8 @@ func SeedDossiers(zack, nelly, mia *actor.Actor) {
 		zack.Mind.AddClaim("mia", memory.Claim{
 			ID:         "c-zk-mia-2",
 			Kind:       memory.ClaimSuspicion,
-			Content:    "Mia is 100% going to leave me to deal with this awkwardness while she raids the fridge.",
-			Salience:   0.82,
+			Content:    "Mia is looking at me like she's about to sell me a timeshare; I need to hear the actual catch.",
+			Salience:   0.85,
 			Conviction: 0.85,
 			Formed:     1,
 		})
@@ -346,7 +346,7 @@ func SeedDossiers(zack, nelly, mia *actor.Actor) {
 		mia.Mind.AddClaim("mia", memory.Claim{
 			ID:         "c-mia-self-1",
 			Kind:       memory.ClaimIntention,
-			Content:    "Keep Zack and Nelly moving forward so the housing inspection doesn't blow up and both of them get what they need.",
+			Content:    "Brief Zack outside the door and make sure he doesn't bolt before we step inside.",
 			Salience:   0.95,
 			Conviction: 0.90,
 			Evidence:   []string{"ep-mia-the-masterplan"},

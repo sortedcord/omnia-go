@@ -168,4 +168,19 @@ func TestScenarioAuthoringDepth(t *testing.T) {
 	if !foundHumiliation {
 		t.Fatalf("expected mention of 'Harrison' to recall ep-zack-lecture-humiliation, got: %+v", zackRecall.SurfacedEpisodes)
 	}
+
+	// 10. Verify Entrypoint Rework: Outside the Door
+	if sc.ZackEntity.Parent != sc.Locations.Breezeway3F.ID {
+		t.Fatalf("expected Zack to spawn on Breezeway outside door, got %s", sc.ZackEntity.Parent)
+	}
+	if sc.MiaEntity.Parent != sc.Locations.Breezeway3F.ID {
+		t.Fatalf("expected Mia to spawn on Breezeway waiting outside door, got %s", sc.MiaEntity.Parent)
+	}
+	if sc.NellyEntity.Parent != sc.Locations.LivingRoom.ID {
+		t.Fatalf("expected Nelly to spawn inside Living Room, got %s", sc.NellyEntity.Parent)
+	}
+	doorEnt := sc.World.Entities["breezeway-to-apt"]
+	if doorEnt == nil || doorEnt.Portal == nil || !doorEnt.Portal.Closed {
+		t.Fatalf("expected front door to be closed at start")
+	}
 }

@@ -142,18 +142,34 @@ func BuildWorldTopology(world *sim.Simulation) (*WorldLocations, error) {
 	// 2. BRYN HALL PUBLIC SPACES (BUILDING 3)
 	// =========================================================================
 
-	// 3rd Floor Breezeway
+	// 3rd Floor Breezeway (Outside Apartment 3B)
 	breezeway := world.SpawnSpace(
 		"breezeway-3f",
-		"3rd Floor Breezeway Corridor",
-		"An open-air concrete walkway outside the apartment doors, lined with metal railings overlooking the quad.",
+		"Bryn Hall 3rd Floor - Outside Apartment 3B",
+		"An open-air concrete breezeway walkway on the third floor of Bryn Hall, right outside the door of Apartment 3B. The metal railing overlooks the evening campus quad below.",
 		true,
 	)
+	_ = breezeway.Attributes.Set("Atmosphere", "Cool autumn evening air, quiet residential corridor")
 	locs.Breezeway3F = breezeway
 
-	// Portals: Hallway (Apt 3B) <-> Breezeway
-	_, _ = world.SpawnPortal("apt-front-door", "Apartment 3B Front Door", hallway.ID, breezeway.ID, "out onto the 3rd floor breezeway")
-	_, _ = world.SpawnPortal("breezeway-to-apt", "Door to Apartment 3B", breezeway.ID, hallway.ID, "into Apartment 3B")
+	// Front Door to Apartment 3B (Portal between Breezeway and Living Room)
+	aptDoor, _ := world.SpawnPortal("breezeway-to-apt", "Apartment 3B Front Door", breezeway.ID, livingRoom.ID, "into Apartment 3B")
+	aptDoor.Description = "A painted wooden door with bronze numerals '3B'. It is closed but unlocked."
+	aptDoor.Portal.Closed = true
+	aptDoor.Portal.Locked = false
+
+	aptDoorReturn, _ := world.SpawnPortal("apt-front-door", "Front Door to Breezeway", livingRoom.ID, breezeway.ID, "out onto the 3rd floor breezeway")
+	aptDoorReturn.Description = "The front door leading out to the 3rd floor breezeway."
+	aptDoorReturn.Portal.Closed = true
+	aptDoorReturn.Portal.Locked = false
+
+	_, _ = world.SpawnEntity(
+		"doorbell-3b",
+		"Apartment 3B Doorbell",
+		"A small rectangular white buzzer beside the apartment door.",
+		breezeway.ID,
+		sim.Link{Relation: sim.RelOn},
+	)
 
 	// Stairwell Landing 3F
 	stairwell := world.SpawnSpace(

@@ -107,13 +107,13 @@ func Setup(interactive bool) (*ScenarioState, error) {
 	zackEntity, _ := world.SpawnActor(
 		"zack",
 		zackMind,
-		locs.LivingRoom.ID,
-		"A tall college student in a worn canvas jacket, holding a paper coffee cup and standing near the doorway looking mildly bemused and visibly sleep-deprived.",
+		locs.Breezeway3F.ID,
+		"A tall college student in a worn canvas jacket, holding a paper coffee cup and standing on the breezeway looking mildly bewildered and sleep-deprived.",
 	)
-	_ = zackEntity.Attributes.Set("mood", "Mildly bewildered, dryly amused, assessing the disaster")
+	_ = zackEntity.Attributes.Set("mood", "Mildly bewildered, dryly amused, assessing the situation")
 	_ = zackEntity.Attributes.Set("arousal", "normal")
 	_ = zackEntity.Attributes.Set("Sleep Debt", "Severe (weeks of internet cafe chairs)")
-	_ = zackEntity.Attributes.SetWithVisibility("Internal Sarcasm", "Barely keeping a straight face while wondering if this apartment has a shower", sim.VisibilityPrivate, []sim.EntityID{"zack"})
+	_ = zackEntity.Attributes.SetWithVisibility("Internal Sarcasm", "Wondering what impossible scheme Mia has cooked up behind this door", sim.VisibilityPrivate, []sim.EntityID{"zack"})
 
 	jacket, _ := world.SpawnEntity("zack-jacket", "Canvas Jacket", "Everyday casual zip-up jacket worn thin at the elbows.", zackEntity.ID, sim.Link{Relation: sim.RelWorn})
 	pocket := world.SpawnSpace("jacket-pocket", "Jacket Pocket", "Small front pocket.", false)
@@ -173,11 +173,11 @@ func Setup(interactive bool) (*ScenarioState, error) {
 	miaEntity, _ := world.SpawnActor(
 		"mia",
 		miaMind,
-		locs.Kitchenette.ID,
-		"A chic, confident girl leaning nonchalantly against the open refrigerator door, sipping an iced tea with a satisfied smirk.",
+		locs.Breezeway3F.ID,
+		"A chic, confident girl leaning nonchalantly against the metal breezeway railing right outside the door to Apartment 3B, sipping an iced tea with a satisfied smirk.",
 	)
 	miaEntity.Salience = 0.75
-	_ = miaEntity.Attributes.Set("mood", "Cheerfully detached, hungry, highly entertained")
+	_ = miaEntity.Attributes.Set("mood", "Cheerfully detached, expectant, highly entertained")
 	_ = miaEntity.Attributes.Set("arousal", "normal")
 	_ = miaEntity.Attributes.Set("Tactical Satisfaction", "95%")
 	_ = miaEntity.Attributes.Set("Appetite", "Snack hunting")
@@ -185,13 +185,20 @@ func Setup(interactive bool) (*ScenarioState, error) {
 	// 4. Seed Tier 3 Subjective Reality Dossiers & Asymmetric Relational Models
 	SeedDossiers(zackMind, nellyMind, miaMind)
 
-	// 5. Schedule Narrative Opening Event
+	// 5. Schedule Narrative Opening Events
+	// Outside the door: Zack arrives and finds Mia waiting for him
+	world.ScheduleEvent(1, locs.Breezeway3F.ID,
+		"You climb the concrete stairs to the third floor of Bryn Hall, following the apartment address Mia frantically texted you twenty minutes ago. "+
+			"Mia is already leaning against the metal breezeway railing right outside the closed door to Apartment 3B, casually swirling an iced tea with an amused grin. "+
+			"\"Took you long enough, slowpoke,\" she says quietly, nodding toward the door of 3B. "+
+			"\"Before we head in, quick ground rules: Nelly is inside having a full-blown existential crisis over her lease audit, and you are about to be her knight in slightly rumpled armor.\"")
+
+	// Inside the apartment: Nelly waits nervously, hearing voices on the breezeway
 	world.ScheduleEvent(1, locs.LivingRoom.ID,
-		"Mia pulled you into the apartment and immediately wandered off toward the kitchen. "+
-			"Nelly has just emerged from the hallway, clutching the cuffs of her oversized hoodie. "+
-			"Her eyes lock onto yours, her face goes bright pink, and she blurts out: \"I made notes.\" "+
-			"There is a suffocatingly awkward three-second pause. \"...I hear how bad that sounds now.\" "+
-			"From the kitchen, Mia opens the fridge with a casual clatter, totally unbothered.")
+		"Inside the quiet living room of Apt 3B, you pace anxiously between the coffee table and the front door, clutching your oversized hoodie cuffs over your knuckles. "+
+			"The color-coded relationship index cards are spread neatly across the pine table. "+
+			"From out on the breezeway, you hear footsteps and Mia's muffled voice talking to someone outside the door. "+
+			"Your stomach drops into freefall—she actually brought someone.")
 
 	return &ScenarioState{
 		World:       world,

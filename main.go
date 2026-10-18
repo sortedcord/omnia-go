@@ -71,7 +71,11 @@ func main() {
 	fmt.Println("==================================================")
 	fmt.Println("   SCENARIO: ACCIDENTAL ARRANGEMENT (SLICE OF LIFE) ")
 	fmt.Println("==================================================")
-	fmt.Printf("Setting:   %s\n", sc.LivingRoom.Name)
+	settingName := sc.LivingRoom.Name
+	if sc.Locations != nil && sc.Locations.Breezeway3F != nil {
+		settingName = sc.Locations.Breezeway3F.Name
+	}
+	fmt.Printf("Setting:   %s\n", settingName)
 	fmt.Printf("Player:    %s\n", sc.ZackMind.Profile.Name)
 	fmt.Printf("Co-Stars:  %s, %s\n", sc.NellyMind.Profile.Name, sc.MiaMind.Profile.Name)
 	fmt.Printf("Clock:     %s\n", sc.World.Clock)
