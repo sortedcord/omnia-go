@@ -185,20 +185,11 @@ func Setup(interactive bool) (*ScenarioState, error) {
 	// 4. Seed Tier 3 Subjective Reality Dossiers & Asymmetric Relational Models
 	SeedDossiers(zackMind, nellyMind, miaMind)
 
-	// 5. Schedule Narrative Opening Events
-	// Outside the door: Zack arrives and finds Mia waiting for him
+	// 5. Schedule Narrative Opening Event (Zack arrives on the 3rd floor breezeway; Mia spots him)
 	world.ScheduleEvent(1, locs.Breezeway3F.ID,
-		"You climb the concrete stairs to the third floor of Bryn Hall, following the apartment address Mia frantically texted you twenty minutes ago. "+
-			"Mia is already leaning against the metal breezeway railing right outside the closed door to Apartment 3B, casually swirling an iced tea with an amused grin. "+
-			"\"Took you long enough, slowpoke,\" she says quietly, nodding toward the door of 3B. "+
-			"\"Before we head in, quick ground rules: Nelly is inside having a full-blown existential crisis over her lease audit, and you are about to be her knight in slightly rumpled armor.\"")
-
-	// Inside the apartment: Nelly waits nervously, hearing voices on the breezeway
-	world.ScheduleEvent(1, locs.LivingRoom.ID,
-		"Inside the quiet living room of Apt 3B, you pace anxiously between the coffee table and the front door, clutching your oversized hoodie cuffs over your knuckles. "+
-			"The color-coded relationship index cards are spread neatly across the pine table. "+
-			"From out on the breezeway, you hear footsteps and Mia's muffled voice talking to someone outside the door. "+
-			"Your stomach drops into freefall—she actually brought someone.")
+		"You climb the concrete stairs to the third floor of Bryn Hall, following the frantic address Mia texted you twenty minutes ago. "+
+			"Stepping out onto the open-air breezeway, you see Mia standing outside the door to Apartment 3B, leaning against the metal railing with an iced tea. "+
+			"As your shoes scuff against the concrete, she turns her head, spots you, and a knowing, triumphant grin spreads across her face.")
 
 	return &ScenarioState{
 		World:       world,
