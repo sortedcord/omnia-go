@@ -28,15 +28,16 @@ func WithRecallConfig(cfg RecallConfig) MindOption {
 type Mind struct {
 	mu sync.RWMutex
 
-	ownerID         string
-	buffer          *WorkingBuffer
-	episodes        map[string]*Episode
-	subjects        map[string]*Subject
-	dossiers        map[string]*Dossier
-	openEpisodeID   string
-	lastDecayTime   time.Time
-	config          RecallConfig
-	isConsolidating bool
+	ownerID             string
+	buffer              *WorkingBuffer
+	episodes            map[string]*Episode
+	subjects            map[string]*Subject
+	dossiers            map[string]*Dossier
+	openEpisodeID       string
+	lastDecayTime       time.Time
+	config              RecallConfig
+	isConsolidating     bool
+	emptyConsolidations int
 
 	nextSubjectSeq int
 	nextClaimSeq   int
@@ -146,6 +147,15 @@ func (m *Mind) allocClaimIDLocked() string {
 			if found {
 				break
 			}
+			for _, c := range d.ArchivedClaims {
+				if c.ID == id {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
 		}
 		if !found {
 			return id
@@ -172,13 +182,13 @@ func (m *Mind) RecordTurn(t Turn) int64 {
 }
 
 // FindOrCreateSubjectForEntity returns the subject registered for entityID, or creates one.
-func (m *Mind) FindOrCreateSubjectForEntity(entityID string, defaultKind SubjectKind) string {
+func (m *Mind) FindOrCreateSubjectForEntity(entityID string, defaultName string, defaultKind SubjectKind) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.findOrCreateSubjectForEntityLocked(entityID, defaultKind)
+	return m.findOrCreateSubjectForEntityLocked(entityID, defaultName, defaultKind)
 }
 
-func (m *Mind) findOrCreateSubjectForEntityLocked(entityID string, defaultKind SubjectKind) string {
+func (m *Mind) findOrCreateSubjectForEntityLocked(entityID string, defaultName string, defaultKind SubjectKind) string {
 	for _, s := range m.subjects {
 		for _, b := range s.Bindings {
 			if b.EntityID == entityID && b.Mode == BindingIdentity {
@@ -190,11 +200,16 @@ func (m *Mind) findOrCreateSubjectForEntityLocked(entityID string, defaultKind S
 		return s.ID
 	}
 
+	name := defaultName
+	if name == "" {
+		name = entityID
+	}
+
 	newID := m.allocSubjectIDLocked()
 	subj := &Subject{
 		ID:    newID,
 		Kind:  defaultKind,
-		Names: []string{entityID},
+		Names: []string{name},
 		Bindings: []Binding{
 			{
 				EntityID:   entityID,
@@ -212,27 +227,42 @@ func (m *Mind) findOrCreateSubjectForEntityLocked(entityID string, defaultKind S
 }
 
 // EnsureOpenEpisode checks if the scene changed or if an episode needs to be opened.
-// If the scene changed, it closes the existing episode and opens a new one.
-func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTime time.Time) (epID string, newlyOpened bool) {
+// If the scene changed, it closes the existing episode and returns a closed consolidation job.
+func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTime time.Time) (epID string, newlyOpened bool, closedJob *ConsolidateJob) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.openEpisodeID != "" {
 		curEp, ok := m.episodes[m.openEpisodeID]
 		if ok && curEp.Status == EpisodeOpen {
-			// If scene is unchanged and time gap is <= 10 minutes, keep existing episode open
 			timeGap := inWorldTime.Sub(curEp.End)
 			if curEp.SceneID == sceneID && timeGap <= 10*time.Minute {
 				curEp.End = inWorldTime
 				if locationID != "" {
-					placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, SubjectPlace)
+					placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, locationID, SubjectPlace)
 					curEp.PlaceIDs = addUniqueString(curEp.PlaceIDs, placeSubjID)
 				}
-				return curEp.ID, false
+				return curEp.ID, false, nil
 			}
 
-			// Boundary reached: close current episode
+			// Boundary reached: close current episode and package closed job for finalization
+			closedID := curEp.ID
 			m.closeEpisodeLocked(curEp, tick, inWorldTime)
+			unconsolidated := m.buffer.UnconsolidatedTurns()
+			var epTurns []Turn
+			for _, t := range unconsolidated {
+				if t.EpisodeID == closedID {
+					epTurns = append(epTurns, t)
+				}
+			}
+			if len(epTurns) > 0 {
+				closedJob = &ConsolidateJob{
+					EpisodeID: closedID,
+					FromSeq:   epTurns[0].Seq,
+					ToSeq:     epTurns[len(epTurns)-1].Seq,
+					Turns:     epTurns,
+				}
+			}
 		}
 	}
 
@@ -254,13 +284,13 @@ func (m *Mind) EnsureOpenEpisode(sceneID, locationID string, tick int, inWorldTi
 		Importance: 0.50,
 	}
 	if locationID != "" {
-		placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, SubjectPlace)
+		placeSubjID := m.findOrCreateSubjectForEntityLocked(locationID, locationID, SubjectPlace)
 		newEp.PlaceIDs = []string{placeSubjID}
 	}
 
 	m.episodes[newID] = newEp
 	m.openEpisodeID = newID
-	return newID, true
+	return newID, true, closedJob
 }
 
 func (m *Mind) closeEpisodeLocked(ep *Episode, tick int, inWorldTime time.Time) {
@@ -510,8 +540,15 @@ func (m *Mind) Recall(cues RecallCues) RecallResult {
 
 // RenderContext generates the developer context sections for Self, Dossiers, and Memories within budgets.
 func (m *Mind) RenderContext(cues RecallCues) (selfText, dossiersText, memoriesText string) {
+	m.mu.RLock()
+	subjsMap := make(map[string]*Subject, len(m.subjects))
+	for k, v := range m.subjects {
+		subjsMap[k] = v.DeepCopy()
+	}
+	m.mu.RUnlock()
+
 	recallRes := m.Recall(cues)
-	return RenderPromptSections(recallRes, m.subjects, 300, 700, 900)
+	return RenderPromptSections(recallRes, subjsMap, 300, 700, 900)
 }
 
 // CloseAllOpenEpisodes closes any open episodes (called when simulation finishes).
@@ -602,11 +639,28 @@ func (m *Mind) FinishConsolidation(job ConsolidateJob, beats []Beat) {
 		return
 	}
 
-	// Never commit or evict turns if zero beats were produced (prevents silent turn loss)
+	// Handle empty consolidation results without stalling/livelocking
 	if len(beats) == 0 {
+		m.emptyConsolidations++
+		if m.emptyConsolidations >= 2 {
+			_, beatText, fSeq, tSeq := m.buffer.DegradedEvictionFallback()
+			if beatText != "" && job.EpisodeID != "" {
+				if ep, ok := m.episodes[job.EpisodeID]; ok {
+					ep.Beats = append(ep.Beats, Beat{
+						FromSeq:  fSeq,
+						ToSeq:    tSeq,
+						Text:     beatText,
+						Degraded: true,
+					})
+				}
+				m.buffer.CommitConsolidation(tSeq)
+				m.emptyConsolidations = 0
+			}
+		}
 		return
 	}
 
+	m.emptyConsolidations = 0
 	if job.EpisodeID != "" {
 		if ep, ok := m.episodes[job.EpisodeID]; ok {
 			ep.Beats = append(ep.Beats, beats...)
@@ -641,8 +695,12 @@ func (m *Mind) GetSubject(id string) (*Subject, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	s, ok := m.subjects[id]
-	return s, ok
+	if !ok {
+		return nil, false
+	}
+	return s.DeepCopy(), true
 }
+
 func (m *Mind) GetDossier(subjectID string) (*Dossier, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -650,9 +708,21 @@ func (m *Mind) GetDossier(subjectID string) (*Dossier, bool) {
 	if !ok {
 		d = &Dossier{SubjectID: subjectID}
 		m.dossiers[subjectID] = d
-		return d, false
+		return d.DeepCopy(), false
 	}
-	return d, true
+	return d.DeepCopy(), true
+}
+
+// AddDossierLink safely adds or reinforces an episode link in a subject dossier.
+func (m *Mind) AddDossierLink(subjectID, episodeID string, weight float64, role LinkRole) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.dossiers[subjectID]
+	if !ok {
+		d = &Dossier{SubjectID: subjectID}
+		m.dossiers[subjectID] = d
+	}
+	d.AddLink(episodeID, weight, role)
 }
 
 // DossiersSnapshot returns a deep copy of all dossiers.

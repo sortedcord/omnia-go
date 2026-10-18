@@ -72,9 +72,7 @@ func TestMemoryDesyncProbe(t *testing.T) {
 		},
 	}
 	ruthMind.AddEpisode(ep03)
-
-	doss, _ := ruthMind.GetDossier("s-home")
-	doss.AddLink(ep03.ID, 1.00, memory.RoleFormative)
+	ruthMind.AddDossierLink("s-home", ep03.ID, 1.00, memory.RoleFormative)
 
 	ruthActor := actor.New(ruthProfile, actor.WithMind(ruthMind))
 	ruthEntity, _ := world.SpawnActor("ruth", ruthActor, tower.ID, "A woman in a coat, looking around in bewilderment.")
@@ -197,9 +195,7 @@ func TestMemoryRecallProbeOnMention(t *testing.T) {
 		Importance:     0.88,
 	}
 	nellyMind.AddEpisode(leoEp)
-
-	leoDoss, _ := nellyMind.GetDossier("s-leo")
-	leoDoss.AddLink(leoEp.ID, 1.0, memory.RoleParticipant)
+	nellyMind.AddDossierLink("s-leo", leoEp.ID, 1.0, memory.RoleParticipant)
 
 	nellyActor := actor.New(nellyProfile, actor.WithMind(nellyMind))
 	nellyEntity, _ := world.SpawnActor("nelly", nellyActor, room.ID, "A girl in a hoodie.")
@@ -347,5 +343,71 @@ func TestRunClosesOpenEpisodes(t *testing.T) {
 	eps := a.Mind.EpisodesSnapshot()
 	if len(eps) != 1 || eps[0].Status != memory.EpisodeClosed {
 		t.Fatalf("Run ended without closing episode: %+v", eps)
+	}
+}
+
+type mockMidRunConsolidator struct{}
+
+func (m mockMidRunConsolidator) Consolidate(_ context.Context, in ConsolidateInput) (ConsolidateResult, error) {
+	return ConsolidateResult{
+		Beats:      []memory.Beat{{Text: "Beat in scene"}},
+		Title:      "Finalized Scene Title",
+		Summary:    "First-person summary of what occurred in the scene.",
+		Tone:       "thoughtful",
+		Importance: 0.80,
+	}, nil
+}
+
+func TestMidRunEpisodeFinalization(t *testing.T) {
+	world := offlineWorld()
+	world.Clock = Clock{
+		TickCount:    1,
+		StartTime:    time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC),
+		TickDuration: 20 * time.Second,
+	}
+	world.Consolidator = mockMidRunConsolidator{}
+
+	roomA := world.SpawnSpace("room-a", "Room A", "", true)
+	roomB := world.SpawnSpace("room-b", "Room B", "", true)
+	door, _ := world.SpawnPortal("door-ab", "Door AB", roomA.ID, roomB.ID, "")
+	door.Portal.Closed = true
+
+	a := actor.New(actor.Profile{ID: "x", Name: "X"})
+	ent, _ := world.SpawnActor("x", a, roomA.ID, "")
+	ent.Controller = fakeController{action: actor.Action{Type: actor.Wait, Action: "wait"}}
+
+	// Tick 1 in room-a (scene-1)
+	world.DeliverDirectEvent("x", "sound in room a")
+	world.Step(context.Background())
+
+	// Advance clock by 15 minutes (45 ticks of 20s) so time gap exceeds 10 minutes
+	world.AdvanceClock(45)
+	world.DeliverDirectEvent("x", "sound in room a 15 minutes later")
+
+	// Tick 2: In-world time gap > 10 min closes scene-1's episode and opens scene-2's episode!
+	world.Step(context.Background())
+	world.WaitConsolidations()
+
+	eps := a.Mind.EpisodesSnapshot()
+	if len(eps) < 2 {
+		t.Fatalf("expected at least 2 episodes, got %d", len(eps))
+	}
+
+	var firstEp *memory.Episode
+	for _, ep := range eps {
+		if ep.PrevID == "" {
+			firstEp = ep
+			break
+		}
+	}
+
+	if firstEp == nil || firstEp.Status != memory.EpisodeClosed {
+		t.Fatalf("expected first episode to be closed: %+v", firstEp)
+	}
+	if firstEp.Title != "Finalized Scene Title" {
+		t.Errorf("expected finalized title, got: %q", firstEp.Title)
+	}
+	if firstEp.Summary != "First-person summary of what occurred in the scene." {
+		t.Errorf("expected finalized summary, got: %q", firstEp.Summary)
 	}
 }

@@ -490,7 +490,49 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 					locID = locChain[0]
 				}
 
-				c.entity.Mind.Mind.EnsureOpenEpisode(string(c.sceneID), locID, currentTick, s.Clock.CurrentTime())
+				_, _, closedJob := c.entity.Mind.Mind.EnsureOpenEpisode(string(c.sceneID), locID, currentTick, s.Clock.CurrentTime())
+				if closedJob != nil && s.Consolidator != nil {
+					var availSubjIDs []string
+					for _, s := range c.entity.Mind.Mind.SubjectsSnapshot() {
+						availSubjIDs = append(availSubjIDs, s.ID)
+					}
+					consInput := ConsolidateInput{
+						ActorID:             c.entity.ID,
+						ActorName:           c.entity.Name,
+						Personality:         c.entity.Mind.Profile.Personality,
+						SceneID:             closedJob.EpisodeID,
+						LocationID:          locID,
+						FromSeq:             closedJob.FromSeq,
+						ToSeq:               closedJob.ToSeq,
+						Turns:               closedJob.Turns,
+						IsSceneClose:        true,
+						AvailableSubjectIDs: availSubjIDs,
+					}
+					s.consolidationWG.Add(1)
+					go func(mind *actor.Actor, in ConsolidateInput, j memory.ConsolidateJob) {
+						defer s.consolidationWG.Done()
+						cRes, cErr := s.Consolidator.Consolidate(ctx, in)
+						title := cRes.Title
+						if title == "" {
+							title = fmt.Sprintf("Scene %s", j.EpisodeID)
+						}
+						summary := cRes.Summary
+						if summary == "" {
+							summary = "Scene concluded."
+						}
+						if cErr == nil && len(cRes.Beats) > 0 {
+							for _, b := range cRes.Beats {
+								mind.Mind.AppendBeat(j.EpisodeID, b)
+							}
+							mind.Mind.FinalizeEpisodeClose(j.EpisodeID, title, summary, cRes.Tone, cRes.Importance, cRes.FormativeSubjectIDs)
+							if j.ToSeq > 0 {
+								mind.Mind.CommitConsolidation(j.ToSeq)
+							}
+						} else {
+							mind.Mind.FinalizeEpisodeClose(j.EpisodeID, title, summary, "quiet", 0.50, nil)
+						}
+					}(c.entity.Mind, consInput, *closedJob)
+				}
 
 				var mentionWords []string
 				for _, ev := range c.pending {
@@ -1172,19 +1214,37 @@ func (s *Simulation) CloseAllEpisodes(ctx context.Context) {
 	}
 	s.mu.Unlock()
 
-	// Execute consolidations outside of s.mu.Lock()
+	// Execute consolidations outside of s.mu.Lock() in parallel with per-actor timeouts
+	var closeWG sync.WaitGroup
 	for _, t := range tasks {
-		cRes, err := s.Consolidator.Consolidate(shutdownCtx, t.input)
-		if err == nil && len(cRes.Beats) > 0 {
-			for _, b := range cRes.Beats {
-				t.mind.Mind.AppendBeat(t.epID, b)
+		closeWG.Add(1)
+		go func(task closeTask) {
+			defer closeWG.Done()
+			actorCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			cRes, err := s.Consolidator.Consolidate(actorCtx, task.input)
+			title := cRes.Title
+			if title == "" {
+				title = fmt.Sprintf("Scene %s", task.epID)
 			}
-			t.mind.Mind.FinalizeEpisodeClose(t.epID, cRes.Title, cRes.Summary, cRes.Tone, cRes.Importance, cRes.FormativeSubjectIDs)
-			if t.toSeq > 0 {
-				t.mind.Mind.CommitConsolidation(t.toSeq)
+			summary := cRes.Summary
+			if summary == "" {
+				summary = "Scene concluded."
 			}
-		}
+			if err == nil && len(cRes.Beats) > 0 {
+				for _, b := range cRes.Beats {
+					task.mind.Mind.AppendBeat(task.epID, b)
+				}
+				task.mind.Mind.FinalizeEpisodeClose(task.epID, title, summary, cRes.Tone, cRes.Importance, cRes.FormativeSubjectIDs)
+				if task.toSeq > 0 {
+					task.mind.Mind.CommitConsolidation(task.toSeq)
+				}
+			} else {
+				task.mind.Mind.FinalizeEpisodeClose(task.epID, title, summary, "quiet", 0.50, nil)
+			}
+		}(t)
 	}
+	closeWG.Wait()
 }
 
 // AdvanceClock increments tick count by ticks.

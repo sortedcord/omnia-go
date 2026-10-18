@@ -224,10 +224,7 @@ func TestRecallAndSurfacing(t *testing.T) {
 		},
 	}
 	mind.AddEpisode(childhoodEp)
-
-	// Link episode to dossier with formative role (weight 1.0)
-	d, _ := mind.dossiers["s-home"]
-	d.AddLink(childhoodEp.ID, 1.0, RoleFormative)
+	mind.AddDossierLink("s-home", childhoodEp.ID, 1.0, RoleFormative)
 
 	// Ruth walks onto lot-elm-14. She sees an office tower, NOT house-elm-14!
 	cues := RecallCues{
