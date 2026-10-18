@@ -1,4 +1,4 @@
-# Plan: Scenario Format & Loader (GUI-authored)
+# Plan: Scenario Format & Loader
 
 > **Status: ACTIVE.** Unblocked: the three-tier memory system (`docs/plans/memory-system.md`) is implemented, and it defines what a scenario can author about a mind. SQLite is ruled out; storage is JSON.
 
@@ -12,7 +12,8 @@
   - `dossiers.go`: subjects (including phantoms), bindings and claims.
 
   A second, older copy of the setup also lives in `tools/visualizer`.
-- **Scenarios are written by a GUI scenario creator, not by hand.** The format is optimized for machines: it must be easy to parse, store, validate, version and diff. Precision matters more than human readability.
+- **Scenarios are templates.** A scenario file is read-only input. The engine never writes it back; a running simulation diverges into memory and, later, into separate save files (§3).
+- **No GUI for now.** A GUI scenario creator is deferred. Scenarios are written as JSON (by hand or by Go fixture generators) and checked with the CLI validator. The format stays machine-friendly (easy to parse, validate, version and diff), so a GUI can be added later without a format change.
 - **Scenarios will be large.** They describe people's lives (identities, biographies, episodic memories, beliefs about other people and things) and detailed worlds (buildings, rooms, objects, ACL attributes). Expect thousands of records and tens of MB per scenario.
 
 ### What hand-authoring the current scenario taught us
@@ -23,20 +24,20 @@ Each of these is a requirement on the format, not a nice-to-have:
 |---|---|
 | The opening was rewritten three times. Moving Zack and Mia outside a closed door split the world into two scenes. | Portal state (`closed`, `locked`, `transparent`) and actor placement are first-class start data. They decide the initial scene partition. |
 | Scripted dialogue in opening events railroaded the player and NPCs. | Opening events describe **situation, not speech or decisions**. The validator emits a lint warning for quoted speech in `events[].text`. |
-| Actors with no inbox events take no turn (Nelly waits silently until something reaches her). | `events` are the only thing that decides **who acts first**. The GUI must show which actors an event reaches. |
+| Actors with no inbox events take no turn (Nelly waits silently until something reaches her). | `events` are the only thing that decides **who acts first**. `validate` reports which actors each tick-1 event reaches. |
 | Recall only works if dossiers link to episodes. Without links, mention cues surfaced nothing. | Links derive mechanically from episode `participant_ids` / `place_ids` and claim `evidence`. They are never authored by hand. |
 | Subject kind was guessed from names ("Pilot" became a place). | Subject `kind` is explicit, and the world entity `kind` is authoritative for auto-registration. |
-| Strangers must not share memories ("Zack and Nelly have never met"). | It is an authoring invariant the GUI can check: a warning when a character appears as a participant in another character's episode. It is never an engine rule. |
+| Strangers must not share memories ("Zack and Nelly have never met"). | It is an authoring lint in `validate`: a warning when a character appears as a participant in another character's episode. It is never an engine rule. |
 | Intentions and feelings depend on the start point ("hear Mia out outside the door"). | Minds are split into **lifetime memory** (per character) and **start-specific state of mind** (per start). |
 
 ---
 
 ## 1. Format Decision
 
-**JSON, normalized, with a versioned JSON Schema as the contract.** This is decided. SQLite and YAML are ruled out.
+**A single JSON file, normalized, with a versioned JSON Schema as the contract.** This is decided. SQLite, YAML and multi-file bundles are ruled out.
 
-- **No new engine dependencies.** JSON is also the native data format of any GUI stack.
-- **One schema drives everything.** The GUI generates TypeScript types, forms, tooltips (from field `description`s) and live validation from it. The engine decodes into matching Go types.
+- **One file per scenario** (`*.omnia.json`). No bundles, no compression, no external assets.
+- **One schema drives everything.** Editors with JSON Schema support (e.g. VS Code via `$schema`) give autocomplete, tooltips (from field `description`s) and shape validation for free. The engine decodes into matching Go types. A future GUI consumes the same schema.
 - **Normalized flat tables (§2)** map one-to-one onto relational tables. If scenarios outgrow whole-file loading, moving to SQLite is a mechanical storage change, not a redesign. The trigger to revisit is files over ~100 MB, or needing partial or queried loading of memories at runtime.
 - **The memory snapshot is already JSON** (`memory.Snapshot` in `pkg/memory/codec.go`). Scenario minds are a strict subset of it, so a future save game is the same shape plus runtime fields.
 
@@ -46,12 +47,12 @@ Each of these is a requirement on the format, not a nice-to-have:
 
 ### Principles
 
-1. **Normalized, not nested.** Each record type is a flat array of records with an `id`. Relationships are ID references. The GUI edits one record at a time, references are explicit and checkable, and diffs stay local.
+1. **Normalized, not nested.** Each record type is a flat array of records with an `id`. Relationships are ID references. References are explicit and checkable, and diffs stay local.
 2. **Arrays of records, never maps keyed by ID.** Arrays keep authored order. The validator rejects duplicate IDs (Go silently keeps the last duplicate key in a map).
 3. **One canonical shape per field.** No shorthand forms.
 4. **No `null`.** An absent field means the schema's documented `default`. `""` and `[]` are explicit values.
-5. **Strict.** Unknown fields are an error. GUI-only data (canvas positions, colors, collapsed state, author notes) goes in a reserved `editor` object, allowed on the document and on every record. The engine ignores it.
-6. **Stable slug IDs** (`^[a-z0-9][a-z0-9_-]{0,63}$`), generated once by the GUI and never changed; renaming changes `name` only. They are not UUIDs: IDs appear in LLM prompts and structured-output enums, where a UUID costs ~20 tokens and is harder for the model to use reliably.
+5. **Strict.** Unknown fields are an error. The only exceptions are the optional top-level `$schema` string (editor support; ignored by the engine) and a reserved `editor` object for author or tooling notes, allowed on the document and on every record. The engine ignores it (reserved for a future GUI's canvas positions and similar).
+6. **Stable slug IDs** (`^[a-z0-9][a-z0-9_-]{0,63}$`), chosen once and never changed; renaming changes `name` only. They are not UUIDs: IDs appear in LLM prompts and structured-output enums, where a UUID costs ~20 tokens and is harder for the model to use reliably.
 7. **Two ID scopes.**
    - **World scope:** characters, entities, starts and events are unique across the document.
    - **Mind scope:** subjects, claims and episodes are unique **within one owner's mind**. A subject ID may deliberately equal a world entity ID (`"zack"`, `"living-room"`); that is a naming convention, not a binding. Bindings are separate and explicit.
@@ -63,6 +64,7 @@ Each of these is a requirement on the format, not a nice-to-have:
 
 ```json
 {
+  "$schema":    "./schema/omnia.scenario.v1.json",
   "format":     { "name": "omnia.scenario", "version": "1.0" },
   "meta":       { "id": "...", "title": "...", "description": "...", "tags": [],
                   "created_at": "...", "updated_at": "...",
@@ -81,11 +83,11 @@ Each of these is a requirement on the format, not a nice-to-have:
 | Record | Purpose | Key fields (abridged) | Engine target |
 |---|---|---|---|
 | `characters` | **Who a person is**, independent of any start | `id`, `name`, `aliases[]`, `personality`, `background`, `born_at`, `traits[]` (`name`, `description`, `intensity`), `likes[]` / `dislikes[]` (each with a `reason`, so they stay purposeful, not generic) | `actor.Profile` (traits, likes and dislikes are rendered into `Personality` / `Background`) |
-| `entities` | **Things in the world.** `kind` ∈ `space`, `item`, `portal`, `actor`. `class` ∈ `building`, `location`, `room`, `point_of_interest`, `object`, `container` is a GUI hint and sets default salience | `id`, `kind`, `class`, `name`, `aliases[]`, `description`, `salience`, `parent_id`, `link` (`relation` ∈ `in`/`on`/`under`/`behind`/`worn`/`held`/`seated`/`contained`, `placement`, `concealed`), `attributes[]`, and kind blocks: `space` (`enterable`, `open`, `transparent`, `soundproof`); `portal` (`from_id`, `to_id`, `direction`, `transparent`, `closed`, `locked`); `actor` (`character_id`, `appearance`) | `sim.Entity` tree, `Space`, `Portal`, `Link`, `Attributes` |
+| `entities` | **Things in the world.** `kind` ∈ `space`, `item`, `portal`, `actor`. `class` ∈ `building`, `location`, `room`, `point_of_interest`, `object`, `container` is an authoring hint and sets default salience | `id`, `kind`, `class`, `name`, `aliases[]`, `description`, `salience`, `parent_id`, `link` (`relation` ∈ `in`/`on`/`under`/`behind`/`worn`/`held`/`seated`/`contained`, `placement`, `concealed`), `attributes[]`, and kind blocks: `space` (`enterable`, `open`, `transparent`, `soundproof`); `portal` (`from_id`, `to_id`, `direction`, `transparent`, `closed`, `locked`); `actor` (`character_id`, `appearance`) | `sim.Entity` tree, `Space`, `Portal`, `Link`, `Attributes` |
 | `attributes` (embedded) | Detailed state with ACL, unchanged from the engine | `key`, `value` (string), `allowed[]`, `core`, `visibility` ∈ `public`/`private`, `accessors[]` (actor entity IDs) | `sim.Attribute` |
 | `history` | **Objective** past events: what actually happened | `id`, `occurred_at`, `precision`, `location_id`, `participant_ids[]`, `summary` | Loaded, **not used** in v1 (§6) |
 
-Portals are one-directional, as in the engine (`counter-pass` / `counter-pass-return`). The GUI draws a pair as one door, and the validator warns when a pair disagrees on `closed` or `locked`.
+Portals are one-directional, as in the engine (`counter-pass` / `counter-pass-return`). The validator warns when a pair disagrees on `closed` or `locked`.
 
 ### Mind records (one per character)
 
@@ -170,7 +172,7 @@ A start is a **snapshot of initial state** built on the shared records. It also 
 }
 ```
 
-These rules are exact, so the GUI and the engine compute the same state:
+These rules are exact and deterministic:
 
 - **Entities.** Only entities in `present_ids` exist, plus the ancestors and portal endpoints they need. The validator enforces this closure. An absent `present_ids` means all entities.
 - **Overrides.** A field-level replace of `parent_id`, `link`, `salience`, or the `space` / `portal` blocks.
@@ -180,19 +182,19 @@ These rules are exact, so the GUI and the engine compute the same state:
 - **Claims.** The lifetime dossiers are applied first, then the start's `upsert_claims` (replace by claim ID, or insert), then `retract_claim_ids`.
   - Claims whose `evidence` points only at excluded episodes are **kept, with that evidence dropped**. A belief can outlive the memory that formed it; the validator emits an info note.
 - **Subjects** in `upsert_subjects` replace a lifetime subject by ID (e.g. a binding that is stale only at this start).
-- **Events** are the only wake-up mechanism: each event reaches the actors in its location and in spaces connected through open portals. The GUI previews **who acts on tick 1**.
+- **Events** are the only wake-up mechanism: each event reaches the actors in its location and in spaces connected through open portals. `validate --start` lists **who acts on tick 1**.
 - **The player** is optional. A start with no player is a fully autonomous run. A runtime `-player` override is allowed.
 
-A save game is the same shape plus runtime fields (turns, counters, links, recall bookkeeping), so v1 avoids anything start-specific that a save couldn't express.
+**Templates, not state.** The scenario file is never modified by the engine. Each start is a small overlay on the shared records (decided, Q6), so a character's lifetime memory is written once. Runtime state (turns, counters, links, recall bookkeeping, world mutations) lives only in memory and, later, in a separate save file that references the scenario by `meta.id` and `format.version`. Save games are out of scope for this plan.
 
 ---
 
 ## 4. Schema as the Single Source of Truth
 
 - **Go spec types are authoritative.** `pkg/scenario/spec` holds plain structs and depends on neither `sim`, `memory` nor `llm`. They carry `json` tags plus `jsonschema` tags (description, enum, pattern, min/max, default).
-- **Engine enums are defined once.** Relations, subject and claim kinds, binding modes, visibility and precision are mirrored from the engine constants. A test asserts the spec enums equal the engine enums, so the GUI can never offer a value the engine rejects.
-- **The schema is generated.** `tools/schemagen` emits `schema/omnia.scenario.v1.json` (JSON Schema 2020-12). It is committed, and a golden test fails if it is stale.
-- **The GUI consumes the schema:** TypeScript types (`json-schema-to-typescript`), forms and tooltips from descriptions, and live shape validation (ajv). Semantic checks come from the engine validator through the CLI (§5).
+- **Engine enums are defined once.** Relations, subject and claim kinds, binding modes, visibility and precision are mirrored from the engine constants. A test asserts the spec enums equal the engine enums, so the schema can never accept a value the engine rejects.
+- **The schema is generated with `github.com/invopop/jsonschema`** (decided, Q2) by reflecting the spec types. `tools/schemagen` emits `schema/omnia.scenario.v1.json` (JSON Schema 2020-12). It is committed, and a golden test fails if it is stale.
+- **Consumers:** scenario files declare `"$schema"` for editor support; semantic checks come from the engine validator through the CLI (§5). Enum constraints, patterns, ranges and the no-unknown-fields rule are expressed with `jsonschema` struct tags and `additionalProperties: false`.
 - **Reference docs are generated.** `docs/scenario-format.md` is produced from the schema descriptions, so it can't drift.
 
 ---
@@ -206,7 +208,7 @@ bytes ─▶ Decode ─▶ spec.Document ─▶ Migrate ─▶ Validate ─▶ B
 
 ### Decode (`pkg/scenario/decode.go`)
 
-1. **Size limit**, default 256 MB, configurable. Gzip is detected by magic bytes (`.omnia.json` / `.omnia.json.gz`).
+1. **Size limit**, default 256 MB, configurable. Plain JSON only (`.omnia.json`).
 2. **Version gate before the strict decode.** A lenient pass reads `format` first.
    - An unknown major version is rejected.
    - A newer minor version is rejected with "requires format 1.3; engine supports ≤ 1.2". Otherwise the strict decode would report confusing unknown-field errors.
@@ -215,12 +217,12 @@ bytes ─▶ Decode ─▶ spec.Document ─▶ Migrate ─▶ Validate ─▶ B
 
 ### Migrate (`pkg/scenario/migrate`)
 
-Ordered `vN → vN+1` functions on generic JSON, run before the typed decode. The GUI calls `omnia scenario migrate`, so both sides upgrade old files identically.
+Ordered `vN → vN+1` functions on generic JSON, run before the typed decode. `omnia scenario migrate <file>` writes an upgraded copy; it never edits in place.
 
 ### Validate (`pkg/scenario/validate.go`)
 
 Every check runs, and all issues are returned together, with no network calls. Each issue carries:
-- a **JSON Pointer** (`/minds/1/dossiers/3/claims/0/evidence/0`), so the GUI can highlight the exact field
+- a **JSON Pointer** (`/minds/1/dossiers/3/claims/0/evidence/0`), so tools can point at the exact field
 - the record `id`
 - a severity (`error` / `warning` / `info`)
 - a stable code and a message
@@ -235,10 +237,10 @@ Every check runs, and all issues are returned together, with no network calls. E
 | Mind ↔ world (I2) | Binding **syntax only** (`mode`, `confidence` range). A binding to an entity absent from a start or from the world is an `info` note ("bound to an entity not present in this start"), **never** an error |
 | Time | Episode `start` ≤ `end`; `born_at` ≤ the earliest episode; history `occurred_at` ≤ the latest start (warning) |
 | Starts | `present_ids` closure; override targets present; `player_id` is a present actor; mind overrides reference existing owners, subjects and claim IDs; a `fixed` lifetime claim may be replaced only by explicit upsert (warning); events have `tick ≥ 1` at present spaces; `tick_seconds > 0` |
-| Authoring lints | Quoted speech in `events[].text` (warning: scripted dialogue); an event that wakes no actor (warning); a start where no actor wakes on tick 1 (error); a portal pair with mismatched state (warning); a character appearing in another character's episode while the start's claims say they are strangers (GUI-only, warning) |
+| Authoring lints | Quoted speech in `events[].text` (warning: scripted dialogue); an event that wakes no actor (warning); a start where no actor wakes on tick 1 (error); a portal pair with mismatched state (warning); a character appearing in another character's episode while the start's claims say they are strangers (warning) |
 | Numbers | Salience ∈ [0.05, 1]; importance ∈ [0.05, 1]; conviction and confidence ∈ [0, 1]; integers JS-safe |
 
-The CLI `omnia scenario validate <file> [--start id] [--json]` is what the GUI calls. Its exit code is non-zero on errors, and `--json` outputs the issue list.
+The CLI `omnia scenario validate <file> [--start id] [--json]` is the authoring loop. Its exit code is non-zero on errors, and `--json` outputs the issue list.
 
 ### Build (`pkg/scenario/build.go`)
 
@@ -284,7 +286,7 @@ Required engine fixes, all small:
 | ~~Episodic memories and reflections~~ | **Resolved** by the memory system. Authored `minds` replace the old `memories` / `reflections` / `thoughts` records |
 | **Relationships** (person → person stance) | **Dropped as a separate record.** A relationship is a dossier about a person subject: an impression plus claims. One concept, not two |
 | **Objective `history`** | **Loaded, not used.** It feeds no prompt; memory invariant I3 keeps the Arbiter away from minds, but a future Arbiter digest of past *world* events is allowed. Episodes may reference a history record only through `editor` (author bookkeeping, e.g. "this is Nelly's distorted memory of h-04"). The engine never reads it |
-| **Nested enterable spaces** (building → floor → room) | **To verify in Phase 0.** Check how scenes, LOD perception and portals treat an enterable space inside an enterable space. Today's 23-space world is flat spaces joined by portals, which works. If nesting is unsupported, the validator rejects enterable spaces inside enterable spaces, and `building` stays a GUI grouping (`editor`) |
+| **Nested enterable spaces** (building → floor → room) | **To verify in Phase 0.** Check how scenes, LOD perception and portals treat an enterable space inside an enterable space. Today's 23-space world is flat spaces joined by portals, which works. If nesting is unsupported, the validator rejects enterable spaces inside enterable spaces, and `building` stays an authoring grouping (`editor`) |
 | **Typed attribute values** | **Out of v1.** Values stay strings, matching `sim.Attributes` |
 | **Hearsay** (`source: hearsay`, `origin: told`) | **Reserved.** The schema rejects them until the memory system implements them |
 
@@ -295,14 +297,14 @@ Required engine fixes, all small:
 Each phase is one commit. `go vet ./... && go test -race ./...` stays green after each, and `scnario/` is untouched throughout.
 
 0. **Decisions and engine checks.** Settle the open questions (§9), verify nested-space semantics, and land the small engine fixes from §5 Build (default client, allocator counters, portal and actor spawn params).
-1. **Spec types and schema generation.** `pkg/scenario/spec`, the enum-parity test against `sim` / `memory`, `tools/schemagen`, the committed schema and its golden freshness test.
-2. **Decoder.** Size limit, gzip, version gate, duplicate-key scan, strict decode, `editor` passthrough. Fixtures for each failure mode.
+1. **Spec types and schema generation.** `pkg/scenario/spec`, the enum-parity test against `sim` / `memory`, `tools/schemagen` on `invopop/jsonschema`, the committed schema and its golden freshness test.
+2. **Decoder.** Size limit, version gate, duplicate-key scan, strict decode, `editor` passthrough. Fixtures for each failure mode.
 3. **Validator and CLI.** All rules with JSON Pointer issues, including the mind-scope rules and the authoring lints; `omnia scenario validate [--start] [--json]`. One table test and one fixture per rule.
 4. **Builder.**
    - Start resolution (entities, overrides, episode inclusion by time, the claim overlay), plus `BuildOptions` / `Instance`.
    - Tests cover: the tree, ACLs, portal state, scene partition at tick 1, mind seeding (subjects, phantoms, bindings, dossiers, episodes, derived links), events, controller wiring and the player override.
 5. **Fixtures and parity.**
-   - `tools/fixturegen` (a stand-in GUI, written in Go) produces `scenarios/accidental_arrangement.omnia.json` from the **current hand-written Go scenario**.
+   - `tools/fixturegen` (Go code that writes scenario documents) produces `scenarios/accidental_arrangement.omnia.json` from the **current hand-written Go scenario**.
    - A **parity test** builds both and compares, using `memory.ExportSnapshot` for minds:
      - entities, parents, links, attributes with ACLs
      - portal state
@@ -316,8 +318,8 @@ Each phase is one commit. `go vet ./... && go test -race ./...` stays green afte
    - `main.go` and `cmd/omnia-http` get `-scenario <file>`, `-start` and `-player`. The hardcoded `"zack"`, `NellyMind` and title strings are removed.
    - Banners and the HTTP server read the title, setting and player from `Instance`. The setting is the player's starting space, not a hardcoded room.
    - `.env` loading moves to `internal/env`, and `tools/visualizer` moves onto the loader, deleting its duplicate setup.
-8. **Docs.** Generated `docs/scenario-format.md`, plus a **GUI integration guide** covering:
-   - schema consumption
+8. **Docs.** Generated `docs/scenario-format.md`, plus an **authoring guide** covering:
+   - using `$schema` for editor support
    - canonical write rules (UTF-8, LF, schema key order, no nulls, JS-safe integers)
    - the `editor` namespace and the two ID scopes
    - lifetime minds vs start overlays
@@ -338,15 +340,14 @@ Each phase is one commit. `go vet ./... && go test -race ./...` stays green afte
 
 ---
 
-## 9. Open Questions
+## 9. Decisions
 
-Resolved:
-- ~~Q1. Format~~: **JSON + JSON Schema.**
-- ~~Q3. Memory engine work~~: **Done** in `pkg/memory`; this plan only seeds it.
-
-Still open:
-- **Q2. Schema generation:** an in-house reflection generator (no dependency, ~300 lines) vs `github.com/invopop/jsonschema` (a dependency, less code). Either way the Go types stay authoritative.
-- **Q4. File packaging:** a single document file (recommended), or a bundle (zip or directory) to reserve room for binary assets such as portraits and maps?
-- **Q5. GUI stack:** if already decided (web, Tauri, native), it confirms or changes the toolchain assumptions in §4.
-- **Q6. Start mind overlays:** the claim / subject overlay (§3, recommended) vs. a complete mind snapshot per start. Overlays keep lifetime memory in one place. Full snapshots are simpler to reason about, but duplicate thousands of records per start.
-- **Q7. Mind-scope IDs:** keep subject IDs free to equal entity IDs (current convention, readable in prompts), or require a prefix (`s-…`) so the two can never be confused in the GUI?
+| # | Decision |
+|---|---|
+| Q1 | Format: **JSON + JSON Schema** |
+| Q2 | Schema generation: **`github.com/invopop/jsonschema`**, reflecting the Go spec types |
+| Q3 | Memory engine work: **done** in `pkg/memory`; this plan only seeds it |
+| Q4 | Packaging: **a single `.omnia.json` file**; no bundles, no compression, no assets |
+| Q5 | GUI: **deferred**. Authoring is JSON plus `$schema` editor support plus `omnia scenario validate`. The format stays GUI-ready (schema, `editor` namespace, JSON Pointer issues) |
+| Q6 | A scenario file is a **read-only template**. Starts are overlays on lifetime records; the engine never writes the file; runtime state goes to separate save files (out of scope) |
+| Q7 | Subject IDs **may equal entity IDs** (current convention). Bindings stay explicit; equal IDs imply nothing |
