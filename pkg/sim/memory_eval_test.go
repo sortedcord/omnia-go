@@ -276,3 +276,54 @@ func TestMemoryWorkingBufferBoundednessAndWatermark(t *testing.T) {
 		t.Errorf("expected at least 3 verbatim replay turns, got %d", len(replay))
 	}
 }
+
+func TestDestroyedEntityPreservesMindBindingsAndClaims(t *testing.T) {
+	now := time.Date(2026, 10, 16, 18, 35, 0, 0, time.UTC)
+	world := offlineWorld()
+	world.Clock = Clock{TickCount: 1, StartTime: now, TickDuration: 20 * time.Second}
+
+	room := world.SpawnSpace("room-1", "Room 1", "A room.", true)
+	item, _ := world.SpawnEntity("antique-clock", "Antique Clock", "A grandfather clock.", room.ID, Link{Relation: RelOn})
+
+	actorMind := memory.NewMind("zack")
+	actorMind.AddSubject(&memory.Subject{
+		ID:    "s-clock",
+		Kind:  memory.SubjectObject,
+		Names: []string{"Antique Clock", "Grandfather Clock"},
+		Bindings: []memory.Binding{
+			{EntityID: "antique-clock", Mode: memory.BindingIdentity, Confidence: 1.0},
+		},
+	})
+	actorMind.AddClaim("s-clock", memory.Claim{
+		ID:         "c-clock-1",
+		Kind:       memory.ClaimBelief,
+		Content:    "The clock chimes loudly on the hour.",
+		Salience:   0.85,
+		Conviction: 0.90,
+	})
+
+	snapBefore, err := actorMind.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Remove/destroy the entity in the simulation world
+	if err := world.RemoveEntity(item.ID); err != nil {
+		t.Fatalf("failed to remove entity: %v", err)
+	}
+
+	if _, exists := world.GetEntity("antique-clock"); exists {
+		t.Fatal("expected antique-clock to be removed from simulation")
+	}
+
+	snapAfter, err := actorMind.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Invariant I2: The world never writes to memory. Mind must be 100% byte-identical!
+	if string(snapBefore) != string(snapAfter) {
+		t.Fatalf("Invariant I2 violation: actor memory mutated when world entity was destroyed!\nBefore: %s\nAfter:  %s",
+			snapBefore, snapAfter)
+	}
+}

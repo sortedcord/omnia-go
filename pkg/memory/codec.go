@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 )
 
@@ -30,16 +31,25 @@ func (m *Mind) ExportSnapshot() Snapshot {
 	for _, ep := range m.episodes {
 		eps = append(eps, ep)
 	}
+	sort.Slice(eps, func(i, j int) bool {
+		return eps[i].ID < eps[j].ID
+	})
 
 	var subjs []*Subject
 	for _, s := range m.subjects {
 		subjs = append(subjs, s)
 	}
+	sort.Slice(subjs, func(i, j int) bool {
+		return subjs[i].ID < subjs[j].ID
+	})
 
 	var doss []*Dossier
 	for _, d := range m.dossiers {
 		doss = append(doss, d)
 	}
+	sort.Slice(doss, func(i, j int) bool {
+		return doss[i].SubjectID < doss[j].SubjectID
+	})
 
 	return Snapshot{
 		OwnerID:          m.ownerID,
