@@ -333,7 +333,7 @@ All tiers serialize to JSON with stable IDs and counters, for scenario seeding n
 
 **Consequence for the deferred scenario-loader plan:** the validator must check binding *syntax* only. Referential integrity is enforced for structure (episode links, claim evidence, subject IDs inside a mind) but **never** between a mind and the world. A binding to `house-elm-14` in a start where it doesn't exist is the feature, not an error. At most it is an info-level note in the GUI ("bound to an entity not present in this start").
 
-This replaces the `memories` / `reflections` records in that plan.
+This replaces the `memories` / `reflections` records in that plan (now active: `docs/plans/scenario-loader.md`, `minds` records).
 
 ## 10. Package layout
 
