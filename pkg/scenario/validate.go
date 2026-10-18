@@ -1,0 +1,404 @@
+package scenario
+
+import (
+	"fmt"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"omnia.adityagupta.dev/pkg/scenario/spec"
+)
+
+var slugRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// Severity defines the impact level of a validation issue.
+type Severity string
+
+const (
+	SeverityError   Severity = "error"
+	SeverityWarning Severity = "warning"
+	SeverityInfo    Severity = "info"
+)
+
+// Issue represents a specific semantic validation failure, warning, or lint note.
+type Issue struct {
+	Pointer  string   `json:"pointer"`
+	RecordID string   `json:"record_id"`
+	Severity Severity `json:"severity"`
+	Code     string   `json:"code"`
+	Message  string   `json:"message"`
+}
+
+// ValidationReport contains all issues discovered during semantic inspection.
+type ValidationReport struct {
+	Valid  bool    `json:"valid"`
+	Issues []Issue `json:"issues"`
+}
+
+// Validate inspects a decoded scenario Document against all semantic and architectural constraints.
+func Validate(doc *spec.Document, startID string) ValidationReport {
+	var issues []Issue
+	add := func(pointer, recordID string, sev Severity, code, msg string) {
+		issues = append(issues, Issue{
+			Pointer:  pointer,
+			RecordID: recordID,
+			Severity: sev,
+			Code:     code,
+			Message:  msg,
+		})
+	}
+
+	if doc == nil {
+		add("/", "", SeverityError, "NIL_DOC", "document cannot be nil")
+		return ValidationReport{Valid: false, Issues: issues}
+	}
+
+	// 1. Meta & Identity Validation
+	if doc.Meta.ID == "" {
+		add("/meta/id", "", SeverityError, "MISSING_ID", "meta.id is required")
+	} else if !slugRegex.MatchString(doc.Meta.ID) {
+		add("/meta/id", doc.Meta.ID, SeverityError, "INVALID_SLUG", "meta.id must be a slug: ^[a-z0-9][a-z0-9_-]{0,63}$")
+	}
+
+	worldIDs := make(map[string]string) // id -> pointer
+	checkWorldID := func(id, pointer, kind string) {
+		if id == "" {
+			add(pointer, "", SeverityError, "MISSING_ID", fmt.Sprintf("%s id cannot be empty", kind))
+			return
+		}
+		if !slugRegex.MatchString(id) {
+			add(pointer, id, SeverityError, "INVALID_SLUG", fmt.Sprintf("%s id %q must be a slug", kind, id))
+		}
+		if prev, exists := worldIDs[id]; exists {
+			add(pointer, id, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate world-scope ID %q (previously declared at %s)", id, prev))
+		} else {
+			worldIDs[id] = pointer
+		}
+	}
+
+	charMap := make(map[string]spec.Character)
+	for i, c := range doc.Characters {
+		ptr := fmt.Sprintf("/characters/%d", i)
+		checkWorldID(c.ID, ptr+"/id", "character")
+		charMap[c.ID] = c
+	}
+
+	entityMap := make(map[string]spec.Entity)
+	actorEntities := make(map[string]bool)
+	spaceEntities := make(map[string]bool)
+	portalEntities := make(map[string]bool)
+
+	for i, e := range doc.Entities {
+		ptr := fmt.Sprintf("/entities/%d", i)
+		checkWorldID(e.ID, ptr+"/id", "entity")
+		entityMap[e.ID] = e
+
+		if e.Salience < 0 || e.Salience > 1.0 {
+			add(ptr+"/salience", e.ID, SeverityError, "OUT_OF_RANGE", "entity salience must be within [0.0, 1.0]")
+		}
+
+		switch e.Kind {
+		case "actor":
+			actorEntities[e.ID] = true
+			if e.Actor == nil {
+				add(ptr+"/actor", e.ID, SeverityError, "MISSING_BLOCK", "actor kind requires 'actor' block")
+			} else {
+				if _, ok := charMap[e.Actor.CharacterID]; !ok {
+					add(ptr+"/actor/character_id", e.ID, SeverityError, "UNKNOWN_REF", fmt.Sprintf("actor references unknown character %q", e.Actor.CharacterID))
+				}
+			}
+		case "space":
+			spaceEntities[e.ID] = true
+			if e.Space == nil {
+				add(ptr+"/space", e.ID, SeverityError, "MISSING_BLOCK", "space kind requires 'space' block")
+			}
+		case "portal":
+			portalEntities[e.ID] = true
+			if e.Portal == nil {
+				add(ptr+"/portal", e.ID, SeverityError, "MISSING_BLOCK", "portal kind requires 'portal' block")
+			}
+		}
+
+		// Attribute validation
+		seenKeys := make(map[string]bool)
+		for j, attr := range e.Attributes {
+			aPtr := fmt.Sprintf("%s/attributes/%d", ptr, j)
+			if seenKeys[attr.Key] {
+				add(aPtr+"/key", e.ID, SeverityError, "DUPLICATE_KEY", fmt.Sprintf("duplicate attribute key %q on entity", attr.Key))
+			}
+			seenKeys[attr.Key] = true
+			if len(attr.Allowed) > 0 && !slices.Contains(attr.Allowed, attr.Value) {
+				add(aPtr+"/value", e.ID, SeverityError, "INVALID_VALUE", fmt.Sprintf("attribute value %q not in allowed enum %v", attr.Value, attr.Allowed))
+			}
+			if attr.Key == "arousal" && !slices.Contains([]string{"low", "normal", "high"}, attr.Value) {
+				add(aPtr+"/value", e.ID, SeverityError, "INVALID_CORE_VALUE", "core attribute 'arousal' must be 'low', 'normal', or 'high'")
+			}
+		}
+	}
+
+	// 2. Spatial Hierarchy & Portals
+	for i, e := range doc.Entities {
+		ptr := fmt.Sprintf("/entities/%d", i)
+		if e.ParentID != "" {
+			parent, ok := entityMap[e.ParentID]
+			if !ok {
+				add(ptr+"/parent_id", e.ID, SeverityError, "UNKNOWN_PARENT", fmt.Sprintf("parent entity %q not found", e.ParentID))
+			} else {
+				if e.Kind == "space" && e.Space != nil && e.Space.Enterable {
+					if parent.Kind == "space" && parent.Space != nil && parent.Space.Enterable {
+						add(ptr+"/parent_id", e.ID, SeverityError, "NESTED_ENTERABLE_SPACE",
+							"enterable spaces cannot be children of other enterable spaces; join them with portals and use 'class' for building grouping")
+					}
+				}
+			}
+		} else {
+			if e.Kind != "space" {
+				add(ptr+"/parent_id", e.ID, SeverityError, "ROOT_MUST_BE_SPACE", fmt.Sprintf("non-space entity %q has no parent", e.ID))
+			}
+		}
+
+		// Check portal endpoints
+		if e.Kind == "portal" && e.Portal != nil {
+			if !spaceEntities[e.Portal.FromID] {
+				add(ptr+"/portal/from_id", e.ID, SeverityError, "UNKNOWN_SPACE", fmt.Sprintf("portal from_id %q is not an existing space", e.Portal.FromID))
+			}
+			if !spaceEntities[e.Portal.ToID] {
+				add(ptr+"/portal/to_id", e.ID, SeverityError, "UNKNOWN_SPACE", fmt.Sprintf("portal to_id %q is not an existing space", e.Portal.ToID))
+			}
+		}
+	}
+
+	// Check tree acyclicity
+	visitedTree := make(map[string]bool)
+	for id := range entityMap {
+		curr := id
+		path := make(map[string]bool)
+		for curr != "" {
+			if path[curr] {
+				add("/entities", id, SeverityError, "CYCLIC_PARENT", fmt.Sprintf("cycle detected in entity parent hierarchy involving %q", curr))
+				break
+			}
+			path[curr] = true
+			if visitedTree[curr] {
+				break
+			}
+			curr = entityMap[curr].ParentID
+		}
+		visitedTree[id] = true
+	}
+
+	// 3. History Validation
+	for i, h := range doc.History {
+		ptr := fmt.Sprintf("/history/%d", i)
+		checkWorldID(h.ID, ptr+"/id", "history")
+		if h.LocationID != "" && !spaceEntities[h.LocationID] {
+			add(ptr+"/location_id", h.ID, SeverityError, "UNKNOWN_SPACE", fmt.Sprintf("history event location %q not found", h.LocationID))
+		}
+		for _, pid := range h.ParticipantIDs {
+			if _, ok := charMap[pid]; !ok {
+				add(ptr+"/participant_ids", h.ID, SeverityError, "UNKNOWN_CHAR", fmt.Sprintf("history participant %q not found", pid))
+			}
+		}
+	}
+
+	// 4. Mind Structure Validation (Memory Invariant I1 & I2)
+	for i, m := range doc.Minds {
+		mPtr := fmt.Sprintf("/minds/%d", i)
+		if _, ok := charMap[m.OwnerID]; !ok {
+			add(mPtr+"/owner_id", m.OwnerID, SeverityError, "UNKNOWN_OWNER", fmt.Sprintf("mind owner %q does not exist in characters", m.OwnerID))
+		}
+
+		mindSubjectIDs := make(map[string]bool)
+		mindSubjectMap := make(map[string]spec.Subject)
+		for j, s := range m.Subjects {
+			sPtr := fmt.Sprintf("%s/subjects/%d", mPtr, j)
+			if s.ID == "" {
+				add(sPtr+"/id", "", SeverityError, "MISSING_ID", "subject id cannot be empty")
+			} else if !slugRegex.MatchString(s.ID) {
+				add(sPtr+"/id", s.ID, SeverityError, "INVALID_SLUG", fmt.Sprintf("subject id %q must be a slug", s.ID))
+			}
+			if mindSubjectIDs[s.ID] {
+				add(sPtr+"/id", s.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate subject ID %q in mind of %s", s.ID, m.OwnerID))
+			}
+			mindSubjectIDs[s.ID] = true
+			mindSubjectMap[s.ID] = s
+
+			// Binding checks (syntax only - I2)
+			for k, b := range s.Bindings {
+				bPtr := fmt.Sprintf("%s/bindings/%d", sPtr, k)
+				if b.Confidence < 0 || b.Confidence > 1.0 {
+					add(bPtr+"/confidence", s.ID, SeverityError, "OUT_OF_RANGE", "binding confidence must be in [0.0, 1.0]")
+				}
+				if _, ok := entityMap[b.EntityID]; !ok {
+					// Fallible reality desync: emit INFO, never ERROR
+					add(bPtr+"/entity_id", s.ID, SeverityInfo, "UNBOUND_ENTITY",
+						fmt.Sprintf("subject %q binds to entity %q not present in world (reality de-sync)", s.ID, b.EntityID))
+				}
+			}
+		}
+
+		// Episode IDs
+		mindEpisodeIDs := make(map[string]bool)
+		for j, ep := range m.Episodes {
+			ePtr := fmt.Sprintf("%s/episodes/%d", mPtr, j)
+			if ep.ID == "" {
+				add(ePtr+"/id", "", SeverityError, "MISSING_ID", "episode id cannot be empty")
+			} else if !slugRegex.MatchString(ep.ID) {
+				add(ePtr+"/id", ep.ID, SeverityError, "INVALID_SLUG", fmt.Sprintf("episode id %q must be a slug", ep.ID))
+			}
+			if mindEpisodeIDs[ep.ID] {
+				add(ePtr+"/id", ep.ID, SeverityError, "DUPLICATE_ID", fmt.Sprintf("duplicate episode ID %q in mind of %s", ep.ID, m.OwnerID))
+			}
+			mindEpisodeIDs[ep.ID] = true
+
+			if ep.Importance < 0.05 || ep.Importance > 1.0 {
+				add(ePtr+"/importance", ep.ID, SeverityError, "OUT_OF_RANGE", "episode importance must be within [0.05, 1.0]")
+			}
+
+			st, err1 := time.Parse(time.RFC3339, ep.Start)
+			et, err2 := time.Parse(time.RFC3339, ep.End)
+			if err1 != nil {
+				add(ePtr+"/start", ep.ID, SeverityError, "INVALID_TIME", fmt.Sprintf("invalid start time RFC 3339: %v", err1))
+			}
+			if err2 != nil {
+				add(ePtr+"/end", ep.ID, SeverityError, "INVALID_TIME", fmt.Sprintf("invalid end time RFC 3339: %v", err2))
+			}
+			if err1 == nil && err2 == nil && st.After(et) {
+				add(ePtr+"/start", ep.ID, SeverityError, "TIME_ORDER", "episode start time cannot be after end time")
+			}
+
+			for _, pid := range ep.ParticipantIDs {
+				if !mindSubjectIDs[pid] && pid != m.OwnerID {
+					add(ePtr+"/participant_ids", ep.ID, SeverityError, "UNKNOWN_SUBJECT", fmt.Sprintf("participant %q not found in mind's subjects", pid))
+				}
+			}
+			for _, plid := range ep.PlaceIDs {
+				if !mindSubjectIDs[plid] {
+					add(ePtr+"/place_ids", ep.ID, SeverityError, "UNKNOWN_SUBJECT", fmt.Sprintf("place %q not found in mind's subjects", plid))
+				}
+			}
+
+			if len(ep.Beats) == 0 {
+				add(ePtr+"/beats", ep.ID, SeverityError, "EMPTY_BEATS", "episode must have at least one beat")
+			}
+			for bIdx, beat := range ep.Beats {
+				bPtr := fmt.Sprintf("%s/beats/%d", ePtr, bIdx)
+				if strings.TrimSpace(beat.Text) == "" {
+					add(bPtr+"/text", ep.ID, SeverityError, "EMPTY_BEAT_TEXT", "beat text cannot be empty")
+				}
+				for _, sid := range beat.SubjectIDs {
+					if !mindSubjectIDs[sid] && sid != m.OwnerID {
+						add(bPtr+"/subject_ids", ep.ID, SeverityError, "UNKNOWN_SUBJECT", fmt.Sprintf("beat subject %q not in mind", sid))
+					}
+				}
+			}
+		}
+
+		// Dossiers
+		seenDossierSubjects := make(map[string]bool)
+		for j, d := range m.Dossiers {
+			dPtr := fmt.Sprintf("%s/dossiers/%d", mPtr, j)
+			if !mindSubjectIDs[d.SubjectID] && d.SubjectID != m.OwnerID {
+				add(dPtr+"/subject_id", d.SubjectID, SeverityError, "UNKNOWN_SUBJECT", fmt.Sprintf("dossier subject %q does not exist in mind", d.SubjectID))
+			}
+			if seenDossierSubjects[d.SubjectID] {
+				add(dPtr+"/subject_id", d.SubjectID, SeverityError, "DUPLICATE_DOSSIER", fmt.Sprintf("duplicate dossier for subject %q", d.SubjectID))
+			}
+			seenDossierSubjects[d.SubjectID] = true
+
+			for k, c := range d.Claims {
+				cPtr := fmt.Sprintf("%s/claims/%d", dPtr, k)
+				if c.ID == "" {
+					add(cPtr+"/id", "", SeverityError, "MISSING_ID", "claim id cannot be empty")
+				} else if !slugRegex.MatchString(c.ID) {
+					add(cPtr+"/id", c.ID, SeverityError, "INVALID_SLUG", fmt.Sprintf("claim id %q must be a slug", c.ID))
+				}
+				if c.Salience < 0.05 || c.Salience > 1.0 {
+					add(cPtr+"/salience", c.ID, SeverityError, "OUT_OF_RANGE", "claim salience must be within [0.05, 1.0]")
+				}
+				if c.Conviction < 0 || c.Conviction > 1.0 {
+					add(cPtr+"/conviction", c.ID, SeverityError, "OUT_OF_RANGE", "claim conviction must be within [0.0, 1.0]")
+				}
+				for _, evID := range c.Evidence {
+					if !mindEpisodeIDs[evID] {
+						add(cPtr+"/evidence", c.ID, SeverityError, "UNKNOWN_EPISODE", fmt.Sprintf("claim evidence episode %q not in mind", evID))
+					}
+				}
+			}
+		}
+	}
+
+	// 5. Starts Validation
+	if len(doc.Starts) == 0 {
+		add("/starts", "", SeverityError, "NO_STARTS", "scenario must define at least one starting point")
+	}
+
+	startMap := make(map[string]spec.Start)
+	for i, st := range doc.Starts {
+		sPtr := fmt.Sprintf("/starts/%d", i)
+		checkWorldID(st.ID, sPtr+"/id", "start")
+		startMap[st.ID] = st
+
+		if st.Clock.TickSeconds <= 0 {
+			add(sPtr+"/clock/tick_seconds", st.ID, SeverityError, "INVALID_CLOCK", "clock.tick_seconds must be positive")
+		}
+		if st.PlayerID != "" {
+			if !actorEntities[st.PlayerID] {
+				add(sPtr+"/player_id", st.ID, SeverityError, "UNKNOWN_PLAYER", fmt.Sprintf("player_id %q is not an actor entity", st.PlayerID))
+			}
+		}
+
+		presentSet := make(map[string]bool)
+		for _, pid := range st.PresentIDs {
+			if _, ok := entityMap[pid]; !ok {
+				add(sPtr+"/present_ids", st.ID, SeverityError, "UNKNOWN_PRESENT", fmt.Sprintf("present entity %q not found in entities", pid))
+			}
+			presentSet[pid] = true
+		}
+
+		// Check initial events
+		for j, ev := range st.Events {
+			ePtr := fmt.Sprintf("%s/events/%d", sPtr, j)
+			checkWorldID(ev.ID, ePtr+"/id", "event")
+			if ev.Tick < 1 {
+				add(ePtr+"/tick", ev.ID, SeverityError, "INVALID_TICK", "event tick must be >= 1")
+			}
+			if !spaceEntities[ev.LocationID] {
+				add(ePtr+"/location_id", ev.ID, SeverityError, "UNKNOWN_SPACE", fmt.Sprintf("event location %q is not a space", ev.LocationID))
+			}
+
+			// Authoring lint: quoted dialogue in events
+			if strings.Contains(ev.Text, "\"") || strings.Contains(ev.Text, "“") {
+				add(ePtr+"/text", ev.ID, SeverityWarning, "LINT_SCRIPTED_DIALOGUE",
+					"opening event contains quoted dialogue; opening events should describe physical situation rather than pre-scripting speech")
+			}
+		}
+
+		// Authoring lint: tick 1 activity
+		hasTick1Event := false
+		for _, ev := range st.Events {
+			if ev.Tick == 1 {
+				hasTick1Event = true
+				break
+			}
+		}
+		if !hasTick1Event {
+			add(sPtr+"/events", st.ID, SeverityError, "NO_TICK1_EVENT", "start must contain at least one tick-1 event to trigger simulation wake-up")
+		}
+	}
+
+	// Determine overall validity
+	hasError := false
+	for _, iss := range issues {
+		if iss.Severity == SeverityError {
+			hasError = true
+			break
+		}
+	}
+
+	return ValidationReport{
+		Valid:  !hasError,
+		Issues: issues,
+	}
+}
