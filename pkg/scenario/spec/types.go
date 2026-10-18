@@ -4,14 +4,14 @@ import "encoding/json"
 
 // Document represents the top-level root of an Omnia scenario specification.
 type Document struct {
-	Schema     string         `json:"$schema,omitempty" jsonschema:"description=URL or relative path to the JSON Schema contract"`
-	Format     Format         `json:"format" jsonschema:"required,description=Scenario format identification"`
-	Meta       Meta           `json:"meta" jsonschema:"required,description=Scenario metadata and authorship info"`
-	Characters []Character    `json:"characters" jsonschema:"required,description=List of unique characters defined in this scenario"`
-	Entities   []Entity       `json:"entities" jsonschema:"required,description=List of physical entities, spaces, items, and portals"`
-	History    []HistoryEvent `json:"history,omitempty" jsonschema:"description=Objective historical events that occurred prior to start"`
-	Minds      []Mind         `json:"minds" jsonschema:"required,description=Lifetime subjective memories and dossiers per character"`
-	Starts     []Start        `json:"starts" jsonschema:"required,minItems=1,description=One or more initial starting points/snapshots"`
+	Schema     string          `json:"$schema,omitempty" jsonschema:"description=URL or relative path to the JSON Schema contract"`
+	Format     Format          `json:"format" jsonschema:"required,description=Scenario format identification"`
+	Meta       Meta            `json:"meta" jsonschema:"required,description=Scenario metadata and authorship info"`
+	Characters []Character     `json:"characters" jsonschema:"required,description=List of unique characters defined in this scenario"`
+	Entities   []Entity        `json:"entities" jsonschema:"required,description=List of physical entities, spaces, items, and portals"`
+	History    []HistoryEvent  `json:"history,omitempty" jsonschema:"description=Objective historical events that occurred prior to start"`
+	Minds      []Mind          `json:"minds" jsonschema:"required,description=Lifetime subjective memories and dossiers per character"`
+	Starts     []Start         `json:"starts" jsonschema:"required,minItems=1,description=One or more initial starting points/snapshots"`
 	Editor     json.RawMessage `json:"editor,omitempty" jsonschema:"description=Reserved object for authoring tooling or GUI metadata"`
 }
 
@@ -203,9 +203,9 @@ type Mind struct {
 
 // Clock defines the simulation clock configuration at a start point.
 type Clock struct {
-	Cycle        int    `json:"cycle" jsonschema:"required,minimum=1,description=Simulation day or cycle number"`
-	StartAt      string `json:"start_at" jsonschema:"required,description=RFC 3339 simulation starting time"`
-	TickSeconds  int    `json:"tick_seconds" jsonschema:"required,minimum=1,description=Simulated elapsed seconds per tick"`
+	Cycle       int    `json:"cycle" jsonschema:"required,minimum=1,description=Simulation day or cycle number"`
+	StartAt     string `json:"start_at" jsonschema:"required,description=RFC 3339 simulation starting time"`
+	TickSeconds int    `json:"tick_seconds" jsonschema:"required,minimum=1,description=Simulated elapsed seconds per tick"`
 }
 
 // EntityOverride specifies start-time modifications to an entity.
