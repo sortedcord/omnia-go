@@ -50,9 +50,10 @@ type ScenarioState struct {
 	MiaMind     *actor.Actor
 	LivingRoom  *sim.Entity
 	Kitchen     *sim.Entity
+	Locations   *WorldLocations
 }
 
-// Setup initializes the "Accidental Arrangement" slice-of-life scenario.
+// Setup initializes the "Accidental Arrangement" slice-of-life scenario with full 3-tier memory depth.
 func Setup(interactive bool) (*ScenarioState, error) {
 	LoadDotEnv(".env")
 
@@ -80,113 +81,44 @@ func Setup(interactive bool) (*ScenarioState, error) {
 		TickCount:    1,
 	}, sim.WithSeed(42))
 
-	// 2. Spatial Topology (Nelly's Subsidized Couple Apartment)
-	livingRoom := world.SpawnSpace(
-		"living-room",
-		"Nelly's Apartment - Living Room",
-		"A warm, slightly cluttered college apartment living room. Everything has been hastily staged to look like a loving couple lives here.",
-		true,
-	)
-	_ = livingRoom.Attributes.Set("Atmosphere", "Warm, faintly smelling of lavender, coffee, and printed paper")
-	_ = livingRoom.Attributes.Set("Social Tension", "Thick, awkward relational panic")
+	// 2. Spatial World Topology (22 Detailed Interconnected Spaces & Props)
+	locs, err := BuildWorldTopology(world)
+	if err != nil {
+		return nil, fmt.Errorf("failed building world topology: %w", err)
+	}
 
-	kitchen := world.SpawnSpace(
-		"kitchenette",
-		"Open Kitchenette",
-		"A compact kitchen with laminate countertops and a sink, separated from the living room by an open breakfast counter.",
-		true,
-	)
+	// 3. Create the Actors with 3-Tier Subjective Memory
 
-	// Open connection between living room and kitchen
-	_, _ = world.SpawnPortal("counter-pass", "Kitchen Breakfast Counter", livingRoom.ID, kitchen.ID, "kitchen counter")
-	_, _ = world.SpawnPortal("counter-pass-return", "Breakfast Counter to Living Room", kitchen.ID, livingRoom.ID, "into living room")
-
-	// 3. Staged Props & Clutter
-	coffeeTable, _ := world.SpawnEntity(
-		"coffee-table",
-		"Low Wooden Coffee Table",
-		"A small pine table placed directly in front of the couch.",
-		livingRoom.ID,
-		sim.Link{Relation: sim.RelOn},
-	)
-
-	_, _ = world.SpawnEntity(
-		"relationship-notes",
-		"Color-Coded Relationship Notes",
-		"Neatly handwritten, color-tabbed index cards covering fake anniversaries, couple quirks, first-date lore, and pet peeves.",
-		coffeeTable.ID,
-		sim.Link{Relation: sim.RelOn, Placement: "stacked prominently on the table"},
-	)
-
-	chair, _ := world.SpawnEntity(
-		"dining-chair",
-		"Wooden Dining Chair",
-		"A mismatched wooden chair near the kitchen counter.",
-		livingRoom.ID,
-		sim.Link{Relation: sim.RelOn},
-	)
-
-	_, _ = world.SpawnEntity(
-		"staged-flannel",
-		"Oversized Guy's Flannel Shirt",
-		"A large plaid flannel shirt draped deliberately over the chair back to signal a resident boyfriend.",
-		chair.ID,
-		sim.Link{Relation: sim.RelOn, Placement: "carefully draped to look casual"},
-	)
-
-	_, _ = world.SpawnEntity(
-		"refrigerator",
-		"College-Dorm Refrigerator",
-		"A noisy white fridge covered in takeout menus and magnetic poetry. The door is currently cracked open.",
-		kitchen.ID,
-		sim.Link{Relation: sim.RelOn},
-	)
-
-	// 4. Create the Actors
-
-	// --- ZACK (Player Character) ---
+	// --- ZACK (Player Character / Reluctant Partner) ---
 	zackProfile := actor.Profile{
 		ID:          "zack",
 		Name:        "Zack",
-		Personality: "Observant, grounded, slightly dry humor, loyal friend caught in an absurd social mess",
+		Personality: "Observant, grounded, dry understated humor, fiercely self-reliant, quietly exhausted from months of couch-surfing and internet cafes",
 		Directives: []string{
-			"Decide how to handle Mia's chaotic scheme and Nelly's housing emergency",
+			"Figure out what Mia and Nelly actually expect you to do before agreeing to anything crazy",
 			"React naturally to Nelly's awkwardness without making her completely combust",
+			"Protect your dignity—do not let anyone treat you like a charity case",
 		},
+		Background: "Fourth-year architecture student. After his roommates moved out with their partners, he lost his lease and spent months couch-surfing, sleeping in internet cafes, and occasionally freezing on park benches. He does not know Nelly prior to Mia dragging him into Apt 3B.",
 	}
 	zackMind := actor.New(zackProfile)
+	SeedZackEpisodes(zackMind)
 
-	// Seed Zack's initial thoughts
-	zackMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtIntention,
-		Content:  "Figure out what Mia and Nelly actually expect me to do before I agree to anything crazy.",
-		Links:    []string{"living-room", "relationship-notes"},
-		Salience: 0.90,
-	})
-	zackMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtBelief,
-		Content:  "Nelly looks like she is three seconds away from spontaneous social combustion.",
-		Links:    []string{"living-room"},
-		Salience: 0.80,
-	})
-	zackMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtSuspicion,
-		Content:  "Mia is 100% going to leave me to deal with this awkwardness while she raids the fridge.",
-		Links:    []string{"kitchenette"},
-		Salience: 0.75,
-	})
-
-	zackEntity, _ := world.SpawnActor("zack", zackMind, livingRoom.ID, "A college student in casual clothes, standing near the doorway looking mildly bemused.")
+	zackEntity, _ := world.SpawnActor(
+		"zack",
+		zackMind,
+		locs.LivingRoom.ID,
+		"A tall college student in a worn canvas jacket, holding a paper coffee cup and standing near the doorway looking mildly bemused and visibly sleep-deprived.",
+	)
 	_ = zackEntity.Attributes.Set("mood", "Mildly bewildered, dryly amused, assessing the disaster")
 	_ = zackEntity.Attributes.Set("arousal", "normal")
-	_ = zackEntity.Attributes.Set("Awkwardness Bar", "Rising")
-	// Private attribute accessible only to Zack:
-	_ = zackEntity.Attributes.SetWithVisibility("Internal Sarcasm", "Barely keeping a straight face", sim.VisibilityPrivate, []sim.EntityID{"zack"})
+	_ = zackEntity.Attributes.Set("Sleep Debt", "Severe (weeks of internet cafe chairs)")
+	_ = zackEntity.Attributes.SetWithVisibility("Internal Sarcasm", "Barely keeping a straight face while wondering if this apartment has a shower", sim.VisibilityPrivate, []sim.EntityID{"zack"})
 
-	jacket, _ := world.SpawnEntity("zack-jacket", "Canvas Jacket", "Everyday casual zip-up jacket.", zackEntity.ID, sim.Link{Relation: sim.RelWorn})
+	jacket, _ := world.SpawnEntity("zack-jacket", "Canvas Jacket", "Everyday casual zip-up jacket worn thin at the elbows.", zackEntity.ID, sim.Link{Relation: sim.RelWorn})
 	pocket := world.SpawnSpace("jacket-pocket", "Jacket Pocket", "Small front pocket.", false)
 	_ = world.Move(pocket.ID, jacket.ID, sim.Link{Relation: sim.RelIn})
-	_, _ = world.SpawnEntity("zack-phone", "Smartphone", "Screen showing Mia's frantic texts: 'GET UP HERE NOW'.", pocket.ID, sim.Link{Relation: sim.RelIn})
+	_, _ = world.SpawnEntity("zack-phone", "Smartphone", "Screen showing Mia's frantic texts: 'GET UP HERE NOW; YOU WILL THANK ME'.", pocket.ID, sim.Link{Relation: sim.RelIn})
 
 	var humanCtrl *sim.HumanController
 	if interactive {
@@ -194,92 +126,67 @@ func Setup(interactive bool) (*ScenarioState, error) {
 		_ = world.SetController(zackEntity.ID, humanCtrl)
 	}
 
-	// --- NELLY (Autonomous AI Character) ---
+	// --- NELLY (Autonomous AI Character / Panicked Tenant) ---
 	nellyProfile := actor.Profile{
 		ID:          "nelly",
 		Name:        "Nelly",
-		Personality: "Warm, considerate, severely flustered under relational pressure, overthinks social perception, detail-obsessed when stressed",
+		Personality: "Warm, considerate, severely flustered under relational pressure, overthinks social perception, detail-obsessed when stressed, terrified of administrative failure",
 		Directives: []string{
 			"Try desperately to act natural and explain the fake relationship setup without dying of embarrassment",
-			"Keep the subsidized couple apartment so you don't get evicted by the housing board",
+			"Keep the subsidized couple apartment so you don't get evicted by the housing board and forced into your parents' basement",
+			"Figure out if Zack can be trusted or if he thinks you're completely insane",
 		},
-		Background: "Lives in subsidized couple housing. Her ex moved out months ago, but she couldn't afford to report it. Verification is approaching, and Mia dragged Zack in as her temporary fake boyfriend.",
+		Background: "Lives in subsidized couple housing (Apt 3B). Her ex David walked out six weeks ago. The housing board scheduled a mandatory in-person audit for Thursday. Mia dragged Zack in as a stand-in boyfriend.",
 	}
 	nellyMind := actor.New(nellyProfile)
+	SeedNellyEpisodes(nellyMind)
 
-	nellyMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtIntention,
-		Content:  "Explain the arrangement to Zack so he understands the stakes, but stop sounding so formal and weird.",
-		Links:    []string{"relationship-notes", "living-room"},
-		Salience: 0.95,
-	})
-	nellyMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtBelief,
-		Content:  "The 'notes' comment made me sound completely insane. I need to make a normal human face.",
-		Links:    []string{"living-room"},
-		Salience: 0.90,
-	})
-	nellyMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtSuspicion,
-		Content:  "Mia is hiding in the kitchen on purpose to make me do the talking.",
-		Links:    []string{"kitchenette"},
-		Salience: 0.70,
-	})
-	nellyMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtFeeling,
-		Content:  "My cheeks feel like boiling radiators and my fingers are trembling inside my sleeves.",
-		Links:    []string{"living-room"},
-		Salience: 0.85,
-	})
-
-	nellyEntity, _ := world.SpawnActor("nelly", nellyMind, livingRoom.ID,
-		"A girl in her early 20s wearing an oversized gray hoodie pulled over her knuckles, hair hastily pinned back, looking equal parts mortified and determined.")
+	nellyEntity, _ := world.SpawnActor(
+		"nelly",
+		nellyMind,
+		locs.LivingRoom.ID,
+		"A girl in her early 20s wearing an oversized gray hoodie pulled over her knuckles, hair hastily pinned back, looking equal parts mortified and determined.",
+	)
 	nellyEntity.Salience = 0.95
-
 	_ = nellyEntity.Attributes.Set("mood", "Deeply flustered, overthinking every syllable, gripping hoodie sleeves")
 	_ = nellyEntity.Attributes.Set("arousal", "high")
 	_ = nellyEntity.Attributes.Set("Heart Rate", "125 bpm")
 	_ = nellyEntity.Attributes.Set("Social Battery", "12%")
 	_ = nellyEntity.Attributes.Set("Face Redness", "Maximum")
-	_ = nellyEntity.Attributes.SetWithVisibility("Subconscious Panic", "Desperately terrified of having to move back into her parents' basement", sim.VisibilityPrivate, nil)
+	_ = nellyEntity.Attributes.SetWithVisibility("Subconscious Panic", "Desperately terrified of having to move back into her parents' basement", sim.VisibilityPrivate, []sim.EntityID{"nelly"})
 
-	// --- MIA (Autonomous AI Character) ---
+	// --- MIA (Autonomous AI Character / The Mastermind Fixer) ---
 	miaProfile := actor.Profile{
 		ID:          "mia",
 		Name:        "Mia",
-		Personality: "Socially bulletproof, cheerful, pragmatically shameless, smooth, easily amused, loves placing people together to solve problems",
+		Personality: "Socially bulletproof, cheerful, pragmatically shameless, sharp-eyed fixer, fiercely protective of her friends behind an amused smile",
 		Directives: []string{
 			"Keep Zack and Nelly moving forward so the housing inspection doesn't blow up",
+			"Ensure Zack realizes this solves his housing crisis too while letting him keep his pride",
 			"Enjoy the awkward entertainment while raiding Nelly's fridge",
 		},
-		Background: "Close friend of both Zack and Nelly. Sees zero moral issue with roping Zack into a fake relationship to save Nelly's lease.",
+		Background: "Close friend of both Zack and Nelly (who didn't know each other). Discovered Zack sleeping in a laundromat and Nelly crying on her kitchen floor, and engineered this arrangement as the ultimate pragmatic win-win.",
 	}
 	miaMind := actor.New(miaProfile)
+	SeedMiaEpisodes(miaMind)
 
-	miaMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtIntention,
-		Content:  "Give Zack and Nelly space to break the ice while I find something good to eat.",
-		Links:    []string{"kitchenette", "refrigerator"},
-		Salience: 0.80,
-	})
-	miaMind.AddThought(actor.Thought{
-		Kind:     actor.ThoughtBelief,
-		Content:  "Zack is too nice to leave Nelly hanging, and Nelly's panic is adorable.",
-		Links:    []string{"living-room"},
-		Salience: 0.85,
-	})
-
-	miaEntity, _ := world.SpawnActor("mia", miaMind, kitchen.ID,
-		"A chic, confident girl leaning nonchalantly against the open refrigerator door, sipping an iced tea.")
+	miaEntity, _ := world.SpawnActor(
+		"mia",
+		miaMind,
+		locs.Kitchenette.ID,
+		"A chic, confident girl leaning nonchalantly against the open refrigerator door, sipping an iced tea with a satisfied smirk.",
+	)
 	miaEntity.Salience = 0.75
-
 	_ = miaEntity.Attributes.Set("mood", "Cheerfully detached, hungry, highly entertained")
 	_ = miaEntity.Attributes.Set("arousal", "normal")
-	_ = miaEntity.Attributes.Set("Stress Level", "0%")
+	_ = miaEntity.Attributes.Set("Tactical Satisfaction", "95%")
 	_ = miaEntity.Attributes.Set("Appetite", "Snack hunting")
 
-	// Schedule initial narrative opening event
-	world.ScheduleEvent(1, livingRoom.ID,
+	// 4. Seed Tier 3 Subjective Reality Dossiers & Asymmetric Relational Models
+	SeedDossiers(zackMind, nellyMind, miaMind)
+
+	// 5. Schedule Narrative Opening Event
+	world.ScheduleEvent(1, locs.LivingRoom.ID,
 		"Mia pulled you into the apartment and immediately wandered off toward the kitchen. "+
 			"Nelly has just emerged from the hallway, clutching the cuffs of her oversized hoodie. "+
 			"Her eyes lock onto yours, her face goes bright pink, and she blurts out: \"I made notes.\" "+
@@ -296,7 +203,8 @@ func Setup(interactive bool) (*ScenarioState, error) {
 		NellyMind:   nellyMind,
 		MiaEntity:   miaEntity,
 		MiaMind:     miaMind,
-		LivingRoom:  livingRoom,
-		Kitchen:     kitchen,
+		LivingRoom:  locs.LivingRoom,
+		Kitchen:     locs.Kitchenette,
+		Locations:   locs,
 	}, nil
 }

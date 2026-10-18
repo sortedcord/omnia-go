@@ -528,6 +528,12 @@ func (m *Mind) AddClaim(subjectID string, c Claim) {
 		c.ID = m.allocClaimIDLocked()
 	}
 
+	for _, ev := range c.Evidence {
+		if ev != "" {
+			d.AddLink(ev, 1.0, RoleEvidence)
+		}
+	}
+
 	for i := range d.Claims {
 		if d.Claims[i].ID == c.ID {
 			d.Claims[i] = c
@@ -542,6 +548,24 @@ func (m *Mind) AddEpisode(ep *Episode) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.episodes[ep.ID] = ep
+
+	// Automatically link episode to its participant and place subject dossiers
+	for _, pid := range ep.ParticipantIDs {
+		d, ok := m.dossiers[pid]
+		if !ok {
+			d = &Dossier{SubjectID: pid}
+			m.dossiers[pid] = d
+		}
+		d.AddLink(ep.ID, 1.0, RoleParticipant)
+	}
+	for _, plid := range ep.PlaceIDs {
+		d, ok := m.dossiers[plid]
+		if !ok {
+			d = &Dossier{SubjectID: plid}
+			m.dossiers[plid] = d
+		}
+		d.AddLink(ep.ID, 0.8, RolePlace)
+	}
 }
 
 // Recall performs memory scoring and returns the retrieval results.
