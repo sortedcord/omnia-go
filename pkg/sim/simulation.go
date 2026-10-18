@@ -11,6 +11,7 @@ import (
 
 	"omnia.adityagupta.dev/pkg/actor"
 	"omnia.adityagupta.dev/pkg/llm"
+	"omnia.adityagupta.dev/pkg/memory"
 )
 
 // Option allows configuring a Simulation during initialization.
@@ -34,6 +35,13 @@ func WithBroadcaster(b Broadcaster) Option {
 func WithDistiller(d ThoughtDistiller) Option {
 	return func(sim *Simulation) {
 		sim.Distiller = d
+	}
+}
+
+// WithConsolidator configures the Episodic Memory Consolidator.
+func WithConsolidator(c Consolidator) Option {
+	return func(sim *Simulation) {
+		sim.Consolidator = c
 	}
 }
 
@@ -72,8 +80,9 @@ type Simulation struct {
 	nextSceneID int
 	lastTargets map[EntityID][]EntityID // actorID -> actors who targeted them last tick
 
-	// Thought Distillation
+	// Thought Distillation & Memory Consolidation
 	Distiller      ThoughtDistiller
+	Consolidator   Consolidator
 	pendingDistill map[EntityID]chan DistillResult
 	lastDistill    map[EntityID]*DistillResult
 
@@ -106,6 +115,7 @@ func New(clock Clock, opts ...Option) *Simulation {
 		Arbiter:         NewLLMArbiter(defaultLLM, "gemini-3.5-flash-lite"),
 		Broadcaster:     NewLLMBroadcaster(defaultLLM, "gemini-3.5-flash-lite"),
 		Distiller:       NewLLMDistiller(defaultLLM, "gemini-3.5-flash-lite"),
+		Consolidator:    NewLLMConsolidator(defaultLLM, "gemini-3.5-flash-lite"),
 		Seed:            seed,
 		RNG:             rand.New(rand.NewSource(seed)),
 		pendingIntent:   make(map[EntityID]string),
@@ -339,16 +349,20 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 
 	// 3. Identify active actors with pending inbox events
 	type candidateActor struct {
-		entity    *Entity
-		spaceID   EntityID
-		sceneID   SceneID
-		pending   []Event
-		view      RenderedPerception
-		relevant  map[string]float64
-		thoughts  string
-		selected  []actor.Thought
-		priorDist *DistillResult
-		stimulus  string
+		entity          *Entity
+		spaceID         EntityID
+		sceneID         SceneID
+		pending         []Event
+		view            RenderedPerception
+		relevant        map[string]float64
+		thoughts        string
+		selected        []actor.Thought
+		priorDist       *DistillResult
+		stimulus        string
+		selfContext     string
+		dossiersContext string
+		memoriesContext string
+		recall          *memory.RecallResult
 	}
 
 	var candidates []candidateActor
@@ -443,6 +457,60 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			c.entity.Mind.LearnEntities(known)
 			c.thoughts = c.entity.Mind.FormatThoughtContext(currentTick, relevantMap)
 			c.selected = c.entity.Mind.SelectThoughts(currentTick, relevantMap, 8)
+
+			if c.entity.Mind.Mind != nil {
+				s.mu.RLock()
+				var locChain []string
+				ancestors := s.Ancestors(c.entity.ID)
+				for _, a := range ancestors {
+					if a.Space != nil {
+						locChain = append(locChain, string(a.ID))
+					}
+				}
+				fmapCopy := make(map[string]float64)
+				if fmap := s.FocusMap[c.entity.ID]; fmap != nil {
+					for k, v := range fmap {
+						fmapCopy[string(k)] = v
+					}
+				}
+				s.mu.RUnlock()
+
+				var percepts []memory.Percept
+				for _, p := range view.Perceivable {
+					percepts = append(percepts, memory.Percept{
+						EntityID: string(p.ID),
+						LOD:      int(view.Seen[p.ID]),
+						Name:     p.Name,
+					})
+				}
+
+				locID := string(c.spaceID)
+				if locID == "" && len(locChain) > 0 {
+					locID = locChain[0]
+				}
+
+				c.entity.Mind.Mind.EnsureOpenEpisode(string(c.sceneID), locID, currentTick, s.Clock.CurrentTime())
+
+				var mentionWords []string
+				for _, ev := range c.pending {
+					mentionWords = append(mentionWords, strings.Fields(ev.Description)...)
+				}
+				mentionWords = append(mentionWords, strings.Fields(view.Text)...)
+
+				cues := memory.RecallCues{
+					Percepts:      percepts,
+					Mentions:      mentionWords,
+					FocusMap:      fmapCopy,
+					LocationChain: locChain,
+					CurrentSpace:  locID,
+					CurrentTick:   currentTick,
+					CurrentTime:   s.Clock.CurrentTime(),
+				}
+
+				recallRes := c.entity.Mind.Mind.Recall(cues)
+				c.recall = &recallRes
+				c.selfContext, c.dossiersContext, c.memoriesContext = memory.RenderPromptSections(recallRes, c.entity.Mind.Mind.SubjectsSnapshotMap(), 300, 700, 900)
+			}
 		}
 	}
 
@@ -495,6 +563,9 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				Thoughts:         c.thoughts,
 				Attributes:       c.entity.Attributes.AccessibleTo(c.entity.ID),
 				TargetCandidates: targetCandidates,
+				SelfContext:      c.selfContext,
+				DossiersContext:  c.dossiersContext,
+				MemoriesContext:  c.memoriesContext,
 			}
 
 			reaction, err := c.entity.Controller.Decide(ctx, c.entity.Mind, turn)
@@ -850,6 +921,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				Reaction:     rt.reaction,
 				SceneRuling:  ar.ruling,
 				Thoughts:     rt.candidate.selected,
+				Recall:       rt.candidate.recall,
 				PriorDistill: rt.candidate.priorDist,
 			})
 		}
@@ -862,6 +934,33 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			if rt.candidate.entity.Mind == nil {
 				continue
 			}
+
+			// Record turn in actor's Mind Working Buffer
+			if rt.candidate.entity.Mind.Mind != nil {
+				var percepts []memory.Percept
+				for _, p := range rt.candidate.view.Perceivable {
+					percepts = append(percepts, memory.Percept{
+						EntityID: string(p.ID),
+						LOD:      int(rt.candidate.view.Seen[p.ID]),
+						Name:     p.Name,
+					})
+				}
+				rt.candidate.entity.Mind.Mind.RecordTurn(memory.Turn{
+					Tick:       currentTick,
+					Time:       s.Clock.CurrentTime(),
+					SceneID:    string(rt.candidate.sceneID),
+					LocationID: string(rt.candidate.spaceID),
+					Perception: rt.candidate.stimulus,
+					Perceived:  percepts,
+					Cognition:  rt.reaction.Cognition,
+					Action: memory.ActionRecord{
+						Type:    rt.reaction.Action.Type.String(),
+						Action:  rt.reaction.Action.Action,
+						Targets: rt.reaction.Action.Targets,
+					},
+				})
+			}
+
 			_, isHuman := rt.candidate.entity.Controller.(*HumanController)
 			distInput := DistillInput{
 				ActorID:       rt.candidate.entity.ID,
@@ -869,6 +968,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				Personality:   rt.candidate.entity.Mind.Profile.Personality,
 				Tick:          currentTick,
 				Timestamp:     currentTimestamp,
+				Time:          s.Clock.CurrentTime(),
 				Stimulus:      rt.candidate.stimulus,
 				Cognition:     rt.reaction.Cognition,
 				Intent:        rt.reaction.Action.Action,
@@ -876,6 +976,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				Thoughts:      rt.candidate.entity.Mind.ThoughtsSnapshot(),
 				Perceivable:   rt.candidate.view.Perceivable,
 				KnownEntities: rt.candidate.entity.Mind.KnownEntitiesCopy(),
+				Mind:          rt.candidate.entity.Mind.Mind,
 			}
 
 			distChan := make(chan DistillResult, 1)
@@ -889,9 +990,52 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 					applied, rejected := mind.ApplyThoughtOps(in.Tick, res.Ops, in.KnownEntities)
 					res.Applied = applied
 					res.Rejected = rejected
+					if mind.Mind != nil && len(res.DossierOps) > 0 {
+						mind.Mind.ApplyDossierOps(in.Tick, res.DossierOps, in.Time)
+					}
 				}
 				out <- res
 			}(rt.candidate.entity.Mind, distInput, distChan)
+
+			// Check if actor's working buffer needs consolidation
+			if s.Consolidator != nil && rt.candidate.entity.Mind.Mind != nil && rt.candidate.entity.Mind.Mind.Buffer().NeedsConsolidation() {
+				buffer := rt.candidate.entity.Mind.Mind.Buffer()
+				unconsolidated := buffer.UnconsolidatedTurns()
+				if len(unconsolidated) > 0 {
+					fromSeq := unconsolidated[0].Seq
+					toSeq := unconsolidated[len(unconsolidated)-1].Seq
+					consInput := ConsolidateInput{
+						ActorID:      rt.candidate.entity.ID,
+						ActorName:    rt.candidate.entity.Name,
+						Personality:  rt.candidate.entity.Mind.Profile.Personality,
+						SceneID:      string(rt.candidate.sceneID),
+						LocationID:   string(rt.candidate.spaceID),
+						FromSeq:      fromSeq,
+						ToSeq:        toSeq,
+						Turns:        unconsolidated,
+						IsSceneClose: false,
+					}
+					go func(mind *actor.Actor, in ConsolidateInput) {
+						cRes, cErr := s.Consolidator.Consolidate(ctx, in)
+						if cErr == nil {
+							for _, b := range cRes.Beats {
+								mind.Mind.AppendBeat(mind.Mind.OpenEpisodeID(), b)
+							}
+							mind.Mind.Buffer().CommitConsolidation(in.ToSeq)
+						} else {
+							_, beatText, fSeq, tSeq := mind.Mind.Buffer().DegradedEvictionFallback()
+							if beatText != "" {
+								mind.Mind.AppendBeat(mind.Mind.OpenEpisodeID(), memory.Beat{
+									FromSeq:  fSeq,
+									ToSeq:    tSeq,
+									Text:     beatText,
+									Degraded: true,
+								})
+							}
+						}
+					}(rt.candidate.entity.Mind, consInput)
+				}
+			}
 		}
 	}
 

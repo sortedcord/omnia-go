@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"omnia.adityagupta.dev/pkg/actor"
+	"omnia.adityagupta.dev/pkg/memory"
 )
 
 // Clock tracks the simulation's temporal progression.
@@ -105,7 +106,8 @@ type TickReport struct {
 	ActorName    string
 	Stimulus     string
 	Reaction     *actor.Reaction
-	SceneRuling  *SceneRuling    // The Arbiter's ruling for this actor's scene
-	Thoughts     []actor.Thought // Active thoughts selected into context for this turn
-	PriorDistill *DistillResult  // Results of background distillation from previous turn
+	SceneRuling  *SceneRuling         // The Arbiter's ruling for this actor's scene
+	Thoughts     []actor.Thought      // Active thoughts selected into context for this turn
+	Recall       *memory.RecallResult // Tier 2 & Tier 3 memory activations, surfaced memories, and breakdowns
+	PriorDistill *DistillResult       // Results of background distillation from previous turn
 }

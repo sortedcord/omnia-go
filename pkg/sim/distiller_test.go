@@ -10,14 +10,14 @@ import (
 )
 
 func TestDistillerSchemaValidation(t *testing.T) {
-	s1 := DistillerSchema(nil)
+	s1 := DistillerSchema(nil, nil)
 	if err := llm.ValidateStrict(s1); err != nil {
-		t.Fatalf("expected DistillerSchema(nil) to pass ValidateStrict: %v", err)
+		t.Fatalf("expected DistillerSchema(nil, nil) to pass ValidateStrict: %v", err)
 	}
 
-	s2 := DistillerSchema([]string{"entity-1", "entity-2"})
+	s2 := DistillerSchema([]string{"s-zack", "s-nelly"}, []string{"entity-1", "entity-2"})
 	if err := llm.ValidateStrict(s2); err != nil {
-		t.Fatalf("expected DistillerSchema with links to pass ValidateStrict: %v", err)
+		t.Fatalf("expected DistillerSchema with subjects to pass ValidateStrict: %v", err)
 	}
 }
 
@@ -34,11 +34,11 @@ func (c *recordingDistillerClient) ChatCompletion(ctx context.Context, req llm.C
 	return &llm.ChatResponse{
 		Content: `{
 			"ops": [
-				{"op": "add", "id": null, "kind": "belief", "content": "The room is quiet.", "links": [], "salience": 1.50},
-				{"op": "update", "id": "th-1", "kind": null, "content": "Updated plan.", "links": ["entity-1"], "salience": 0.01},
-				{"op": "drop", "id": "th-2", "kind": null, "content": null, "links": [], "salience": null},
-				{"op": "add", "id": null, "kind": "feeling", "content": "Nervous.", "links": [], "salience": 0.50},
-				{"op": "add", "id": null, "kind": "suspicion", "content": "Excess op 5 should be capped.", "links": [], "salience": 0.50}
+				{"op": "upsert_claim", "subject_id": "zack", "claim_id": null, "kind": "belief", "content": "The room is quiet.", "salience": 1.50, "conviction": 0.80},
+				{"op": "upsert_claim", "subject_id": "zack", "claim_id": "c-1", "kind": null, "content": "Updated plan.", "salience": 0.01, "conviction": null},
+				{"op": "retract_claim", "subject_id": "zack", "claim_id": "c-2", "kind": null, "content": null, "salience": null, "conviction": null},
+				{"op": "upsert_claim", "subject_id": "zack", "claim_id": null, "kind": "feeling", "content": "Nervous.", "salience": 0.50, "conviction": null},
+				{"op": "upsert_claim", "subject_id": "zack", "claim_id": null, "kind": "suspicion", "content": "Excess op 5 should be capped.", "salience": 0.50, "conviction": null}
 			]
 		}`,
 		Duration: 10 * time.Millisecond,

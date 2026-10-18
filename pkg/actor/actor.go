@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"omnia.adityagupta.dev/pkg/llm"
+	"omnia.adityagupta.dev/pkg/memory"
 )
 
 // Option allows configuring an Actor during creation.
@@ -69,10 +70,18 @@ func WithResponseSchema(fn func(stimulus SensoryEvent) *llm.ResponseFormat) Opti
 	}
 }
 
+// WithMind configures a custom or restored Mind instance.
+func WithMind(m *memory.Mind) Option {
+	return func(a *Actor) {
+		a.Mind = m
+	}
+}
+
 // Actor represents an autonomous, subjective entity in the simulation.
 type Actor struct {
 	Profile       Profile
 	Memory        *Memory
+	Mind          *memory.Mind
 	SystemPrompts []SystemPrompt
 
 	client          llm.Client
@@ -87,6 +96,7 @@ func New(profile Profile, opts ...Option) *Actor {
 	a := &Actor{
 		Profile:         profile,
 		Memory:          NewMemory(),
+		Mind:            memory.NewMind(profile.ID),
 		SystemPrompts:   DefaultSystemPrompts(profile.Name),
 		model:           "gemini-3.5-flash-lite",
 		reasoningEffort: llm.ReasoningHigh,
@@ -127,7 +137,21 @@ func (a *Actor) RemoveSystemPrompt(name string) {
 
 // AddThought seeds or inserts a thought directly into the actor's memory.
 func (a *Actor) AddThought(t Thought) Thought {
-	return a.Memory.AddThought(t)
+	out := a.Memory.AddThought(t)
+	if a.Mind != nil {
+		subjectID := a.Profile.ID
+		if len(t.Links) > 0 {
+			subjectID = t.Links[0]
+		}
+		a.Mind.AddClaim(subjectID, memory.Claim{
+			ID:         out.ID,
+			Kind:       memory.ClaimKind(out.Kind),
+			Content:    out.Content,
+			Salience:   out.Salience,
+			Conviction: 0.85,
+		})
+	}
+	return out
 }
 
 // ThoughtsSnapshot returns a thread-safe copy of the actor's current thoughts.
@@ -215,38 +239,73 @@ func (a *Actor) buildMessages(currentStimulus SensoryEvent) []llm.Message {
 	// 2. Modular Developer Messages: Identity, somatic attributes, and subjective memory state
 	messages = append(messages, a.buildDeveloperMessages(currentStimulus.Attributes)...)
 
-	// 3. Subjective Turn History
-	turns := a.Memory.Turns
-	if a.Memory.MaxHistoryTurns > 0 && len(turns) > a.Memory.MaxHistoryTurns {
-		turns = turns[len(turns)-a.Memory.MaxHistoryTurns:]
-	}
-
-	for _, turn := range turns {
-		// Sensory ingress experienced by this actor
-		stimulusText := turn.Stimulus
-		if turn.Timestamp != "" {
-			stimulusText = fmt.Sprintf("[SIMULATION SENSORY EVENT: %s]\n%s", turn.Timestamp, turn.Stimulus)
-		}
-		messages = append(messages, llm.Message{
-			Role:    llm.User,
-			Content: stimulusText,
-		})
-
-		// Manifest action previously emitted by this actor
-		actionJSON, _ := json.Marshal(turn.Action)
-		messages = append(messages, llm.Message{
-			Role:    llm.Assistant,
-			Content: string(actionJSON),
-		})
-	}
-
-	// 4. Current State of Mind (Grouped Developer Thoughts Message)
-	thoughtContext := a.Memory.FormatThoughtContext(currentStimulus.Tick, currentStimulus.Relevant)
-	if strings.TrimSpace(thoughtContext) != "" {
+	// 3. Subjective Memory Context (Sections 4, 5, 6 from Mind)
+	if currentStimulus.SelfContext != "" {
 		messages = append(messages, llm.Message{
 			Role:    llm.Developer,
-			Content: strings.TrimSpace(thoughtContext),
+			Content: currentStimulus.SelfContext,
 		})
+	}
+	if currentStimulus.DossiersContext != "" {
+		messages = append(messages, llm.Message{
+			Role:    llm.Developer,
+			Content: currentStimulus.DossiersContext,
+		})
+	}
+	if currentStimulus.MemoriesContext != "" {
+		messages = append(messages, llm.Message{
+			Role:    llm.Developer,
+			Content: currentStimulus.MemoriesContext,
+		})
+	}
+
+	// 4. Subjective Turn History (Working Buffer if available, else legacy Turns)
+	if a.Mind != nil && a.Mind.Buffer().Len() > 0 {
+		for _, turn := range a.Mind.Buffer().ReplayTurns() {
+			stimulusText := turn.Perception
+			if turn.Tick > 0 {
+				stimulusText = fmt.Sprintf("[SIMULATION SENSORY EVENT: %s]\n%s", turn.Time.Format("15:04:05 UTC"), turn.Perception)
+			}
+			messages = append(messages, llm.Message{
+				Role:    llm.User,
+				Content: stimulusText,
+			})
+			messages = append(messages, llm.Message{
+				Role:    llm.Assistant,
+				Content: turn.Action.ActionToJSON(),
+			})
+		}
+	} else {
+		turns := a.Memory.Turns
+		if a.Memory.MaxHistoryTurns > 0 && len(turns) > a.Memory.MaxHistoryTurns {
+			turns = turns[len(turns)-a.Memory.MaxHistoryTurns:]
+		}
+		for _, turn := range turns {
+			stimulusText := turn.Stimulus
+			if turn.Timestamp != "" {
+				stimulusText = fmt.Sprintf("[SIMULATION SENSORY EVENT: %s]\n%s", turn.Timestamp, turn.Stimulus)
+			}
+			messages = append(messages, llm.Message{
+				Role:    llm.User,
+				Content: stimulusText,
+			})
+			actionJSON, _ := json.Marshal(turn.Action)
+			messages = append(messages, llm.Message{
+				Role:    llm.Assistant,
+				Content: string(actionJSON),
+			})
+		}
+	}
+
+	// If Mind wasn't used to produce SelfContext, fall back to legacy ThoughtContext
+	if currentStimulus.SelfContext == "" {
+		thoughtContext := a.Memory.FormatThoughtContext(currentStimulus.Tick, currentStimulus.Relevant)
+		if strings.TrimSpace(thoughtContext) != "" {
+			messages = append(messages, llm.Message{
+				Role:    llm.Developer,
+				Content: strings.TrimSpace(thoughtContext),
+			})
+		}
 	}
 
 	// 5. Current Sensory Stimulus

@@ -10,6 +10,7 @@ import (
 
 	"omnia.adityagupta.dev/pkg/actor"
 	"omnia.adityagupta.dev/pkg/llm"
+	"omnia.adityagupta.dev/pkg/memory"
 )
 
 // ErrQuit signals that a human controller chose to quit the simulation.
@@ -26,6 +27,9 @@ type Turn struct {
 	Thoughts         string // Active thought context for human player viewing
 	Attributes       map[string]string
 	TargetCandidates []string // Candidate target names for action schema
+	SelfContext      string   // Tier 3: Self-dossier context
+	DossiersContext  string   // Tier 3: Activated dossiers context
+	MemoriesContext  string   // Tier 2: Surfaced memories context
 }
 
 // Controller defines the interface for what directs an actor's decisions.
@@ -48,12 +52,15 @@ func (c *LLMController) Decide(ctx context.Context, mind *actor.Actor, turn Turn
 		return nil, errors.New("llm controller: actor mind is nil")
 	}
 	stimulus := actor.SensoryEvent{
-		Tick:        turn.Tick,
-		Timestamp:   turn.Timestamp,
-		Description: turn.Stimulus,
-		Relevant:    turn.Relevant,
-		Attributes:  turn.Attributes,
-		Targets:     turn.TargetCandidates,
+		Tick:            turn.Tick,
+		Timestamp:       turn.Timestamp,
+		Description:     turn.Stimulus,
+		Relevant:        turn.Relevant,
+		Attributes:      turn.Attributes,
+		Targets:         turn.TargetCandidates,
+		SelfContext:     turn.SelfContext,
+		DossiersContext: turn.DossiersContext,
+		MemoriesContext: turn.MemoriesContext,
 	}
 	return mind.React(ctx, stimulus)
 }
@@ -145,6 +152,18 @@ func (h *HumanController) Decide(ctx context.Context, mind *actor.Actor, turn Tu
 			Cognition: fmt.Sprintf("(Human player command: %q)", rawInput),
 			Action:    action,
 		})
+		if mind.Mind != nil {
+			mind.Mind.RecordTurn(memory.Turn{
+				Tick:       turn.Tick,
+				Perception: turn.Stimulus,
+				Cognition:  fmt.Sprintf("(Human player command: %q)", rawInput),
+				Action: memory.ActionRecord{
+					Type:    action.Type.String(),
+					Action:  action.Action,
+					Targets: action.Targets,
+				},
+			})
+		}
 	}
 
 	return &actor.Reaction{

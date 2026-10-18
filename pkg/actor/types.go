@@ -71,12 +71,15 @@ type Profile struct {
 
 // SensoryEvent represents an external event as subjectively perceived by this actor.
 type SensoryEvent struct {
-	Tick        int                `json:"tick"`
-	Timestamp   string             `json:"timestamp"`   // e.g. "Cycle 104, 03:16 UTC"
-	Description string             `json:"description"` // What the actor's senses register
-	Relevant    map[string]float64 `json:"-"`           // Entity IDs currently in perception/focus -> weight
-	Attributes  map[string]string  `json:"-"`           // Actor's own somatic/psychological attributes accessible to self
-	Targets     []string           `json:"-"`           // Names of perceivable entities available as targets
+	Tick            int                `json:"tick"`
+	Timestamp       string             `json:"timestamp"`   // e.g. "Cycle 104, 03:16 UTC"
+	Description     string             `json:"description"` // What the actor's senses register
+	Relevant        map[string]float64 `json:"-"`           // Entity IDs currently in perception/focus -> weight
+	Attributes      map[string]string  `json:"-"`           // Actor's own somatic/psychological attributes accessible to self
+	Targets         []string           `json:"-"`           // Names of perceivable entities available as targets
+	SelfContext     string             `json:"-"`           // Tier 3: Self-dossier developer context
+	DossiersContext string             `json:"-"`           // Tier 3: Activated dossiers developer context
+	MemoriesContext string             `json:"-"`           // Tier 2: Surfaced episodic memories developer context
 }
 
 // String formats the sensory event for prompt injection.
