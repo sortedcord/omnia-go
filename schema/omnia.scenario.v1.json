@@ -1,0 +1,1269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omnia.adityagupta.dev/schema/omnia.scenario.v1.json",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL or relative path to the JSON Schema contract"
+    },
+    "format": {
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "omnia.scenario"
+          ],
+          "description": "Specification identifier"
+        },
+        "version": {
+          "type": "string",
+          "enum": [
+            "1.0"
+          ],
+          "description": "Major.minor version string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "name",
+        "version"
+      ],
+      "description": "Scenario format identification"
+    },
+    "meta": {
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]{0",
+          "description": "Unique slug identifier for this scenario"
+        },
+        "title": {
+          "type": "string",
+          "description": "Human-readable scenario title"
+        },
+        "description": {
+          "type": "string",
+          "description": "Overview summary of the narrative premise"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Categorization tags"
+        },
+        "created_at": {
+          "type": "string",
+          "description": "RFC 3339 creation timestamp"
+        },
+        "updated_at": {
+          "type": "string",
+          "description": "RFC 3339 last updated timestamp"
+        },
+        "generator": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "name",
+            "version"
+          ],
+          "description": "Tooling generator information"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object",
+      "required": [
+        "id",
+        "title"
+      ],
+      "description": "Scenario metadata and authorship info"
+    },
+    "characters": {
+      "items": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0",
+            "description": "Unique character slug identifier"
+          },
+          "name": {
+            "type": "string",
+            "description": "Full display name"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "description": "Alternative nicknames or references"
+          },
+          "personality": {
+            "type": "string",
+            "description": "Core personality summary"
+          },
+          "directives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "description": "Strategic goals and behavioural guardrails"
+          },
+          "background": {
+            "type": "string",
+            "description": "Biographical history"
+          },
+          "born_at": {
+            "type": "string",
+            "description": "RFC 3339 in-world date of birth"
+          },
+          "traits": {
+            "items": {
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Trait name"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Behavioural impact of this trait"
+                },
+                "intensity": {
+                  "type": "number",
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "description": "Intensity scale 0.0 to 1.0"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "name"
+              ]
+            },
+            "type": "array",
+            "description": "Detailed psychological traits"
+          },
+          "likes": {
+            "items": {
+              "properties": {
+                "item": {
+                  "type": "string",
+                  "description": "Thing or concept liked or disliked"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Why the character feels this way (avoids generic filler)"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "item"
+              ]
+            },
+            "type": "array",
+            "description": "Purposeful likes"
+          },
+          "dislikes": {
+            "items": {
+              "properties": {
+                "item": {
+                  "type": "string",
+                  "description": "Thing or concept liked or disliked"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Why the character feels this way (avoids generic filler)"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "item"
+              ]
+            },
+            "type": "array",
+            "description": "Purposeful dislikes"
+          },
+          "editor": {
+            "description": "Tooling metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "personality"
+        ]
+      },
+      "type": "array",
+      "description": "List of unique characters defined in this scenario"
+    },
+    "entities": {
+      "items": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0",
+            "description": "Unique entity slug identifier"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "space",
+              "item",
+              "portal",
+              "actor"
+            ],
+            "description": "Fundamental entity type"
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "building",
+              "location",
+              "room",
+              "point_of_interest",
+              "object",
+              "container"
+            ],
+            "description": "Semantic classification hint"
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name"
+          },
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "description": "Alternative names for target resolution"
+          },
+          "description": {
+            "type": "string",
+            "description": "Physical sensory description"
+          },
+          "salience": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.05,
+            "description": "Baseline perception prominence (default 0.3 for items"
+          },
+          "parent_id": {
+            "type": "string",
+            "description": "Parent entity ID in spatial hierarchy (empty for root spaces)"
+          },
+          "link": {
+            "properties": {
+              "relation": {
+                "type": "string",
+                "enum": [
+                  "in",
+                  "on",
+                  "under",
+                  "behind",
+                  "worn",
+                  "held",
+                  "seated",
+                  "contained"
+                ],
+                "description": "Spatial attachment relation"
+              },
+              "placement": {
+                "type": "string",
+                "description": "Natural language placement qualifier (e.g. 'tucked behind the pillow')"
+              },
+              "concealed": {
+                "type": "boolean",
+                "description": "True if hidden from casual direct perception without deliberate search"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "relation"
+            ],
+            "description": "Attachment relation to parent"
+          },
+          "attributes": {
+            "items": {
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "Attribute name"
+                },
+                "value": {
+                  "type": "string",
+                  "description": "String representation of attribute value"
+                },
+                "allowed": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "description": "Optional enum whitelist of valid values"
+                },
+                "core": {
+                  "type": "boolean",
+                  "description": "Core attributes cannot be removed at runtime"
+                },
+                "visibility": {
+                  "type": "string",
+                  "enum": [
+                    "public",
+                    "private"
+                  ],
+                  "description": "Exposure level (public or private)"
+                },
+                "accessors": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "description": "Entity IDs permitted to perceive this private attribute"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "key",
+                "value"
+              ]
+            },
+            "type": "array",
+            "description": "Dynamic state attributes"
+          },
+          "space": {
+            "properties": {
+              "enterable": {
+                "type": "boolean",
+                "description": "True if human-scale actors can walk inside"
+              },
+              "open": {
+                "type": "boolean",
+                "description": "True if space allows physical entry"
+              },
+              "transparent": {
+                "type": "boolean",
+                "description": "True if boundaries allow optical visibility"
+              },
+              "soundproof": {
+                "type": "boolean",
+                "description": "True if acoustic events do not penetrate boundaries"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "enterable",
+              "open"
+            ],
+            "description": "Required when kind is space"
+          },
+          "portal": {
+            "properties": {
+              "from_id": {
+                "type": "string",
+                "description": "Origin space entity ID"
+              },
+              "to_id": {
+                "type": "string",
+                "description": "Destination space entity ID"
+              },
+              "direction": {
+                "type": "string",
+                "description": "Natural language direction (e.g. 'into living room')"
+              },
+              "transparent": {
+                "type": "boolean",
+                "description": "True if optical perception penetrates when closed"
+              },
+              "closed": {
+                "type": "boolean",
+                "description": "True if physical passage is obstructed"
+              },
+              "locked": {
+                "type": "boolean",
+                "description": "True if portal cannot be opened without key or permission"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "from_id",
+              "to_id",
+              "closed"
+            ],
+            "description": "Required when kind is portal"
+          },
+          "actor": {
+            "properties": {
+              "character_id": {
+                "type": "string",
+                "description": "Character record backing this body"
+              },
+              "appearance": {
+                "type": "string",
+                "description": "Visual description as observed by onlookers"
+              },
+              "controller": {
+                "type": "string",
+                "enum": [
+                  "llm",
+                  "none"
+                ],
+                "description": "Default controller type"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "character_id"
+            ],
+            "description": "Required when kind is actor"
+          },
+          "editor": {
+            "description": "Tooling metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name"
+        ]
+      },
+      "type": "array",
+      "description": "List of physical entities"
+    },
+    "history": {
+      "items": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0",
+            "description": "Unique history event slug"
+          },
+          "occurred_at": {
+            "type": "string",
+            "description": "RFC 3339 in-world timestamp"
+          },
+          "precision": {
+            "type": "string",
+            "enum": [
+              "minute",
+              "hour",
+              "day",
+              "month",
+              "year"
+            ],
+            "description": "Temporal granularity"
+          },
+          "location_id": {
+            "type": "string",
+            "description": "Space entity ID where event occurred"
+          },
+          "participant_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "description": "Actor entity IDs involved"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Objective summary of what happened"
+          },
+          "editor": {
+            "description": "Tooling metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "occurred_at",
+          "summary"
+        ]
+      },
+      "type": "array",
+      "description": "Objective historical events that occurred prior to start"
+    },
+    "minds": {
+      "items": {
+        "properties": {
+          "owner_id": {
+            "type": "string",
+            "description": "Character ID who owns this mind"
+          },
+          "subjects": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0",
+                  "description": "Subject slug ID unique within this mind"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "person",
+                    "place",
+                    "object",
+                    "group",
+                    "idea"
+                  ],
+                  "description": "Subject category"
+                },
+                "names": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "Subjective aliases and names"
+                },
+                "origin": {
+                  "type": "string",
+                  "enum": [
+                    "authored",
+                    "perceived"
+                  ],
+                  "description": "Origin of this mental subject"
+                },
+                "bindings": {
+                  "items": {
+                    "properties": {
+                      "entity_id": {
+                        "type": "string",
+                        "description": "Target world entity ID"
+                      },
+                      "mode": {
+                        "type": "string",
+                        "enum": [
+                          "identity",
+                          "anchor"
+                        ],
+                        "description": "Belief mode (identity: this IS that entity; anchor: located AT entity)"
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "maximum": 1.0,
+                        "minimum": 0.0,
+                        "description": "Belief confidence score"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "entity_id",
+                      "mode",
+                      "confidence"
+                    ]
+                  },
+                  "type": "array",
+                  "description": "Believed correspondences to world entities (empty for phantoms)"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "id",
+                "kind",
+                "names",
+                "origin"
+              ]
+            },
+            "type": "array",
+            "description": "Mental subjects known to this character"
+          },
+          "dossiers": {
+            "items": {
+              "properties": {
+                "subject_id": {
+                  "type": "string",
+                  "description": "Subject ID (or owner ID for self-dossier)"
+                },
+                "impression": {
+                  "type": "string",
+                  "description": "One-line summary gist (\u003c= 25 words)"
+                },
+                "claims": {
+                  "items": {
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9_-]{0",
+                        "description": "Claim slug ID unique within this mind"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "belief",
+                          "feeling",
+                          "suspicion",
+                          "intention"
+                        ],
+                        "description": "Claim category"
+                      },
+                      "content": {
+                        "type": "string",
+                        "description": "First-person subjective statement"
+                      },
+                      "salience": {
+                        "type": "number",
+                        "maximum": 1.0,
+                        "minimum": 0.05,
+                        "description": "Attention prominence score"
+                      },
+                      "conviction": {
+                        "type": "number",
+                        "maximum": 1.0,
+                        "minimum": 0.0,
+                        "description": "Belief tenacity / certainty"
+                      },
+                      "fixed": {
+                        "type": "boolean",
+                        "description": "Core conviction protected from Distiller mutation and decay floor"
+                      },
+                      "evidence": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "description": "Episode IDs in this mind supporting this claim"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "kind",
+                      "content",
+                      "salience",
+                      "conviction"
+                    ]
+                  },
+                  "type": "array",
+                  "description": "Subjective claims held regarding this subject"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "subject_id",
+                "claims"
+              ]
+            },
+            "type": "array",
+            "description": "Subjective dossiers and claims held by this character"
+          },
+          "episodes": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0",
+                  "description": "Episode slug ID unique within this mind"
+                },
+                "start": {
+                  "type": "string",
+                  "description": "RFC 3339 in-world start timestamp"
+                },
+                "end": {
+                  "type": "string",
+                  "description": "RFC 3339 in-world end timestamp"
+                },
+                "precision": {
+                  "type": "string",
+                  "enum": [
+                    "minute",
+                    "hour",
+                    "day",
+                    "month",
+                    "year"
+                  ],
+                  "description": "Temporal granularity"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Fuzzy temporal label (e.g. 'the summer I turned twelve')"
+                },
+                "place_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "description": "Subject IDs of places actor believed they were"
+                },
+                "participant_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "description": "Subject IDs of characters perceived"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Short episode title (\u003c= 12 words)"
+                },
+                "summary": {
+                  "type": "string",
+                  "description": "First-person narrative overview (\u003c= ~80 words)"
+                },
+                "tone": {
+                  "type": "string",
+                  "description": "Emotional atmosphere (e.g. 'warm and hopeful')"
+                },
+                "importance": {
+                  "type": "number",
+                  "maximum": 1.0,
+                  "minimum": 0.05,
+                  "description": "Formative importance score"
+                },
+                "beats": {
+                  "items": {
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "description": "First-person condensed segment (\u003c= ~60 words)"
+                      },
+                      "subject_ids": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "description": "Mental subjects featured in this beat"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "text"
+                    ]
+                  },
+                  "type": "array",
+                  "minItems": 1,
+                  "description": "Chronological chain of condensed beats"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "id",
+                "start",
+                "end",
+                "title",
+                "summary",
+                "importance",
+                "beats"
+              ]
+            },
+            "type": "array",
+            "description": "Authored episodic memories"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "owner_id",
+          "subjects",
+          "dossiers",
+          "episodes"
+        ]
+      },
+      "type": "array",
+      "description": "Lifetime subjective memories and dossiers per character"
+    },
+    "starts": {
+      "items": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_-]{0",
+            "description": "Unique start point slug identifier"
+          },
+          "name": {
+            "type": "string",
+            "description": "Display title for this starting point"
+          },
+          "clock": {
+            "properties": {
+              "cycle": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Simulation day or cycle number"
+              },
+              "start_at": {
+                "type": "string",
+                "description": "RFC 3339 simulation starting time"
+              },
+              "tick_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Simulated elapsed seconds per tick"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "required": [
+              "cycle",
+              "start_at",
+              "tick_seconds"
+            ],
+            "description": "Initial clock parameters"
+          },
+          "seed": {
+            "type": "integer",
+            "description": "Optional fixed PRNG seed for deterministic runs"
+          },
+          "player_id": {
+            "type": "string",
+            "description": "Optional character ID assigned to the human player"
+          },
+          "present_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "description": "Entity IDs present at this start (empty means all entities)"
+          },
+          "overrides": {
+            "items": {
+              "properties": {
+                "entity_id": {
+                  "type": "string",
+                  "description": "Target entity ID"
+                },
+                "parent_id": {
+                  "type": "string",
+                  "description": "Replacement parent space or container"
+                },
+                "link": {
+                  "properties": {
+                    "relation": {
+                      "type": "string",
+                      "enum": [
+                        "in",
+                        "on",
+                        "under",
+                        "behind",
+                        "worn",
+                        "held",
+                        "seated",
+                        "contained"
+                      ],
+                      "description": "Spatial attachment relation"
+                    },
+                    "placement": {
+                      "type": "string",
+                      "description": "Natural language placement qualifier (e.g. 'tucked behind the pillow')"
+                    },
+                    "concealed": {
+                      "type": "boolean",
+                      "description": "True if hidden from casual direct perception without deliberate search"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "relation"
+                  ],
+                  "description": "Replacement spatial link"
+                },
+                "salience": {
+                  "type": "number",
+                  "maximum": 1.0,
+                  "minimum": 0.05,
+                  "description": "Override salience"
+                },
+                "space": {
+                  "properties": {
+                    "enterable": {
+                      "type": "boolean",
+                      "description": "True if human-scale actors can walk inside"
+                    },
+                    "open": {
+                      "type": "boolean",
+                      "description": "True if space allows physical entry"
+                    },
+                    "transparent": {
+                      "type": "boolean",
+                      "description": "True if boundaries allow optical visibility"
+                    },
+                    "soundproof": {
+                      "type": "boolean",
+                      "description": "True if acoustic events do not penetrate boundaries"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "enterable",
+                    "open"
+                  ],
+                  "description": "Override space block parameters"
+                },
+                "portal": {
+                  "properties": {
+                    "from_id": {
+                      "type": "string",
+                      "description": "Origin space entity ID"
+                    },
+                    "to_id": {
+                      "type": "string",
+                      "description": "Destination space entity ID"
+                    },
+                    "direction": {
+                      "type": "string",
+                      "description": "Natural language direction (e.g. 'into living room')"
+                    },
+                    "transparent": {
+                      "type": "boolean",
+                      "description": "True if optical perception penetrates when closed"
+                    },
+                    "closed": {
+                      "type": "boolean",
+                      "description": "True if physical passage is obstructed"
+                    },
+                    "locked": {
+                      "type": "boolean",
+                      "description": "True if portal cannot be opened without key or permission"
+                    }
+                  },
+                  "additionalProperties": false,
+                  "type": "object",
+                  "required": [
+                    "from_id",
+                    "to_id",
+                    "closed"
+                  ],
+                  "description": "Override portal parameters (e.g. closed/locked)"
+                },
+                "set_attributes": {
+                  "items": {
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "description": "Attribute name"
+                      },
+                      "value": {
+                        "type": "string",
+                        "description": "String representation of attribute value"
+                      },
+                      "allowed": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "description": "Optional enum whitelist of valid values"
+                      },
+                      "core": {
+                        "type": "boolean",
+                        "description": "Core attributes cannot be removed at runtime"
+                      },
+                      "visibility": {
+                        "type": "string",
+                        "enum": [
+                          "public",
+                          "private"
+                        ],
+                        "description": "Exposure level (public or private)"
+                      },
+                      "accessors": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "description": "Entity IDs permitted to perceive this private attribute"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "key",
+                      "value"
+                    ]
+                  },
+                  "type": "array",
+                  "description": "Attributes to set or replace"
+                },
+                "remove_attributes": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "description": "Non-core attribute keys to remove"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "entity_id"
+              ]
+            },
+            "type": "array",
+            "description": "Per-entity initial state overrides"
+          },
+          "minds": {
+            "items": {
+              "properties": {
+                "owner_id": {
+                  "type": "string",
+                  "description": "Character ID whose mind is being modified"
+                },
+                "episode_exclude_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "description": "Lifetime episode IDs to exclude from this start"
+                },
+                "upsert_claims": {
+                  "items": {
+                    "properties": {
+                      "subject_id": {
+                        "type": "string",
+                        "description": "Subject ID in owner's mind"
+                      },
+                      "claim": {
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9_-]{0",
+                            "description": "Claim slug ID unique within this mind"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "belief",
+                              "feeling",
+                              "suspicion",
+                              "intention"
+                            ],
+                            "description": "Claim category"
+                          },
+                          "content": {
+                            "type": "string",
+                            "description": "First-person subjective statement"
+                          },
+                          "salience": {
+                            "type": "number",
+                            "maximum": 1.0,
+                            "minimum": 0.05,
+                            "description": "Attention prominence score"
+                          },
+                          "conviction": {
+                            "type": "number",
+                            "maximum": 1.0,
+                            "minimum": 0.0,
+                            "description": "Belief tenacity / certainty"
+                          },
+                          "fixed": {
+                            "type": "boolean",
+                            "description": "Core conviction protected from Distiller mutation and decay floor"
+                          },
+                          "evidence": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array",
+                            "description": "Episode IDs in this mind supporting this claim"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "kind",
+                          "content",
+                          "salience",
+                          "conviction"
+                        ],
+                        "description": "Claim to insert or update"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "subject_id",
+                      "claim"
+                    ]
+                  },
+                  "type": "array",
+                  "description": "Start-specific intentions"
+                },
+                "retract_claim_ids": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "description": "Claim IDs to retract at this start"
+                },
+                "upsert_subjects": {
+                  "items": {
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9_-]{0",
+                        "description": "Subject slug ID unique within this mind"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "person",
+                          "place",
+                          "object",
+                          "group",
+                          "idea"
+                        ],
+                        "description": "Subject category"
+                      },
+                      "names": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "minItems": 1,
+                        "description": "Subjective aliases and names"
+                      },
+                      "origin": {
+                        "type": "string",
+                        "enum": [
+                          "authored",
+                          "perceived"
+                        ],
+                        "description": "Origin of this mental subject"
+                      },
+                      "bindings": {
+                        "items": {
+                          "properties": {
+                            "entity_id": {
+                              "type": "string",
+                              "description": "Target world entity ID"
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "identity",
+                                "anchor"
+                              ],
+                              "description": "Belief mode (identity: this IS that entity; anchor: located AT entity)"
+                            },
+                            "confidence": {
+                              "type": "number",
+                              "maximum": 1.0,
+                              "minimum": 0.0,
+                              "description": "Belief confidence score"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "type": "object",
+                          "required": [
+                            "entity_id",
+                            "mode",
+                            "confidence"
+                          ]
+                        },
+                        "type": "array",
+                        "description": "Believed correspondences to world entities (empty for phantoms)"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "kind",
+                      "names",
+                      "origin"
+                    ]
+                  },
+                  "type": "array",
+                  "description": "Subjects to insert or replace for this start"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "owner_id"
+              ]
+            },
+            "type": "array",
+            "description": "Start-specific mental state overlays"
+          },
+          "events": {
+            "items": {
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0",
+                  "description": "Unique event slug identifier"
+                },
+                "tick": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Simulation tick number when this event triggers"
+                },
+                "location_id": {
+                  "type": "string",
+                  "description": "Space entity ID where the event is broadcast"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Sensory description of what occurs in the space"
+                }
+              },
+              "additionalProperties": false,
+              "type": "object",
+              "required": [
+                "id",
+                "tick",
+                "location_id",
+                "text"
+              ]
+            },
+            "type": "array",
+            "description": "Scheduled initial sensory events"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "clock"
+        ]
+      },
+      "type": "array",
+      "minItems": 1,
+      "description": "One or more initial starting points/snapshots"
+    },
+    "editor": {
+      "description": "Reserved object for authoring tooling or GUI metadata"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "required": [
+    "format",
+    "meta",
+    "characters",
+    "entities",
+    "minds",
+    "starts"
+  ],
+  "title": "Omnia Scenario Specification v1.0",
+  "description": "JSON Schema contract for Omnia multi-agent narrative scenarios."
+}
