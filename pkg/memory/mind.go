@@ -28,14 +28,15 @@ func WithRecallConfig(cfg RecallConfig) MindOption {
 type Mind struct {
 	mu sync.RWMutex
 
-	ownerID       string
-	buffer        *WorkingBuffer
-	episodes      map[string]*Episode
-	subjects      map[string]*Subject
-	dossiers      map[string]*Dossier
-	openEpisodeID string
-	lastDecayTime time.Time
-	config        RecallConfig
+	ownerID         string
+	buffer          *WorkingBuffer
+	episodes        map[string]*Episode
+	subjects        map[string]*Subject
+	dossiers        map[string]*Dossier
+	openEpisodeID   string
+	lastDecayTime   time.Time
+	config          RecallConfig
+	isConsolidating bool
 
 	nextSubjectSeq int
 	nextClaimSeq   int
@@ -106,8 +107,8 @@ func (m *Mind) RecordTurn(t Turn) int64 {
 
 	seq := m.buffer.Append(t)
 
-	// Mechanical: auto-register clearly perceived entities (LOD >= 2) into subject registry
-	AutoRegisterPercepts(m.subjects, t.Perceived, t.Tick, t.Time, func() string {
+	// Mechanical: auto-register clearly perceived entities (LOD >= 2) into subject registry and dossiers
+	AutoRegisterPercepts(m.subjects, m.dossiers, t.Perceived, t.Tick, t.Time, func() string {
 		id := fmt.Sprintf("s-%s-%d", m.ownerID, m.nextSubjectSeq)
 		m.nextSubjectSeq++
 		return id
@@ -424,7 +425,95 @@ func (m *Mind) RenderContext(cues RecallCues) (selfText, dossiersText, memoriesT
 	return RenderPromptSections(recallRes, m.subjects, 300, 700, 900)
 }
 
-// GetDossier returns a pointer to the dossier for the subject, creating one if not present.
+// CloseAllOpenEpisodes closes any open episodes (called when simulation finishes).
+func (m *Mind) CloseAllOpenEpisodes(tick int, inWorldTime time.Time) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var closed []string
+	if m.openEpisodeID != "" {
+		if curEp, ok := m.episodes[m.openEpisodeID]; ok && curEp.Status == EpisodeOpen {
+			m.closeEpisodeLocked(curEp, tick, inWorldTime)
+			closed = append(closed, curEp.ID)
+		}
+		m.openEpisodeID = ""
+	}
+	return closed
+}
+
+// ConsolidateJob packages a chunk of turns ready for background consolidation.
+type ConsolidateJob struct {
+	EpisodeID string
+	FromSeq   int64
+	ToSeq     int64
+	Turns     []Turn
+}
+
+// StartConsolidation atomically marks the buffer as consolidating and returns uncommitted turns.
+func (m *Mind) StartConsolidation() (ConsolidateJob, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.isConsolidating || !m.buffer.NeedsConsolidation() {
+		return ConsolidateJob{}, false
+	}
+
+	unconsolidated := m.buffer.UnconsolidatedTurns()
+	if len(unconsolidated) == 0 {
+		return ConsolidateJob{}, false
+	}
+
+	m.isConsolidating = true
+	return ConsolidateJob{
+		EpisodeID: m.openEpisodeID,
+		FromSeq:   unconsolidated[0].Seq,
+		ToSeq:     unconsolidated[len(unconsolidated)-1].Seq,
+		Turns:     unconsolidated,
+	}, true
+}
+
+// FinishConsolidation appends consolidated beats and advances the buffer watermark.
+func (m *Mind) FinishConsolidation(job ConsolidateJob, beats []Beat) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.isConsolidating = false
+	if len(beats) > 0 && job.EpisodeID != "" {
+		if ep, ok := m.episodes[job.EpisodeID]; ok {
+			ep.Beats = append(ep.Beats, beats...)
+		}
+	}
+	m.buffer.CommitConsolidation(job.ToSeq)
+}
+
+// AbortConsolidation resets the consolidation flag and triggers degraded fallback only if at 2x budget.
+func (m *Mind) AbortConsolidation() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.isConsolidating = false
+	if m.buffer.EstimatedTokens() > 2*m.buffer.budgetTokens {
+		_, beatText, fSeq, tSeq := m.buffer.DegradedEvictionFallback()
+		if beatText != "" && m.openEpisodeID != "" {
+			if ep, ok := m.episodes[m.openEpisodeID]; ok {
+				ep.Beats = append(ep.Beats, Beat{
+					FromSeq:  fSeq,
+					ToSeq:    tSeq,
+					Text:     beatText,
+					Degraded: true,
+				})
+			}
+		}
+	}
+}
+
+// GetSubject returns a registered subject by ID.
+func (m *Mind) GetSubject(id string) (*Subject, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s, ok := m.subjects[id]
+	return s, ok
+}
 func (m *Mind) GetDossier(subjectID string) (*Dossier, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

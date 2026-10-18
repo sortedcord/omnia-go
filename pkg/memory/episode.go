@@ -2,6 +2,7 @@ package memory
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -78,7 +79,7 @@ func (e *Episode) FormatSummary() string {
 
 	places := ""
 	if len(e.PlaceIDs) > 0 {
-		places = fmt.Sprintf(" at [%s]", e.PlaceIDs[0])
+		places = fmt.Sprintf(" at [%s]", strings.Join(e.PlaceIDs, ", "))
 	}
 
 	toneStr := ""
@@ -86,7 +87,7 @@ func (e *Episode) FormatSummary() string {
 		toneStr = fmt.Sprintf(" | Feeling: %s", e.Tone)
 	}
 
-	return fmt.Sprintf("- [%s: %s%s%s]\n  %s", e.ID, e.Title, places, toneStr, e.Summary)
+	return fmt.Sprintf("- [%s: %s | %s%s%s]\n  %s", e.ID, e.Title, dateStr, places, toneStr, e.Summary)
 }
 
 // FormatVivid formats an episode in full detail including its chronological beats.

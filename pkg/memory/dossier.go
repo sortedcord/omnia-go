@@ -59,11 +59,12 @@ type EpisodeLink struct {
 
 // Dossier represents everything an actor subjectively believes, feels, and knows about one subject.
 type Dossier struct {
-	SubjectID  string        `json:"subject_id"` // Matches Subject.ID, or owner ID for self-dossier
-	Impression string        `json:"impression"` // One-line summary gist (<= 25 words)
-	Claims     []Claim       `json:"claims"`
-	Links      []EpisodeLink `json:"links,omitempty"`
-	Updated    int           `json:"updated_tick"`
+	SubjectID      string        `json:"subject_id"` // Matches Subject.ID, or owner ID for self-dossier
+	Impression     string        `json:"impression"` // One-line summary gist (<= 25 words)
+	Claims         []Claim       `json:"claims"`
+	ArchivedClaims []Claim       `json:"archived_claims,omitempty"` // Faded or retracted claims kept for introspection
+	Links          []EpisodeLink `json:"links,omitempty"`
+	Updated        int           `json:"updated_tick"`
 }
 
 // DecayClaims applies kind-specific temporal decay to claims based on elapsed in-world time.
@@ -101,6 +102,9 @@ func (d *Dossier) DecayClaims(currentTime time.Time, lastDecayTime time.Time) {
 		if newSalience >= 0.08 || floor > 0 {
 			c.Salience = newSalience
 			active = append(active, c)
+		} else {
+			c.Salience = newSalience
+			d.ArchivedClaims = append(d.ArchivedClaims, c)
 		}
 	}
 	d.Claims = active
@@ -193,6 +197,7 @@ func (d *Dossier) ApplyOp(tick int, op DossierOp, openEpisodeID string) error {
 					Content: c.Content,
 					Tick:    tick,
 				})
+				d.ArchivedClaims = append(d.ArchivedClaims, c)
 				d.Claims = append(d.Claims[:i], d.Claims[i+1:]...)
 				d.Updated = tick
 				return nil

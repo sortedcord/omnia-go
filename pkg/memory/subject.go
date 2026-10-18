@@ -121,8 +121,8 @@ func Recognize(subjects map[string]*Subject, percepts []Percept, locationChain [
 	return res
 }
 
-// AutoRegisterPercepts creates new perceived subjects for entities observed at LOD >= 2 that lack bindings.
-func AutoRegisterPercepts(subjects map[string]*Subject, percepts []Percept, currentTick int, currentTime time.Time, nextSubjectID func() string) []string {
+// AutoRegisterPercepts creates new perceived subjects and dossiers for entities observed at LOD >= 2 that lack bindings.
+func AutoRegisterPercepts(subjects map[string]*Subject, dossiers map[string]*Dossier, percepts []Percept, currentTick int, currentTime time.Time, nextSubjectID func() string) []string {
 	var newlyRegistered []string
 
 	boundEntities := make(map[string]bool)
@@ -164,6 +164,11 @@ func AutoRegisterPercepts(subjects map[string]*Subject, percepts []Percept, curr
 			Origin: OriginPerceived,
 		}
 		subjects[subjID] = subj
+		if dossiers != nil {
+			if _, ok := dossiers[subjID]; !ok {
+				dossiers[subjID] = &Dossier{SubjectID: subjID}
+			}
+		}
 		boundEntities[p.EntityID] = true
 		newlyRegistered = append(newlyRegistered, subjID)
 	}

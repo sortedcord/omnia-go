@@ -101,22 +101,7 @@ func (s *Simulation) Where(id EntityID) (*Entity, bool) {
 func (s *Simulation) Ancestors(id EntityID) []*Entity {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	var result []*Entity
-	curr, ok := s.Entities[id]
-	if !ok {
-		return result
-	}
-
-	for curr.Parent != "" {
-		parent, ok := s.Entities[curr.Parent]
-		if !ok {
-			break
-		}
-		result = append(result, parent)
-		curr = parent
-	}
-	return result
+	return s.ancestorsLocked(id)
 }
 
 // Descendants recursively returns all entities contained inside this entity's subtree.

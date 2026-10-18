@@ -461,7 +461,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			if c.entity.Mind.Mind != nil {
 				s.mu.RLock()
 				var locChain []string
-				ancestors := s.Ancestors(c.entity.ID)
+				ancestors := s.ancestorsLocked(c.entity.ID)
 				for _, a := range ancestors {
 					if a.Space != nil {
 						locChain = append(locChain, string(a.ID))
@@ -495,7 +495,6 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				for _, ev := range c.pending {
 					mentionWords = append(mentionWords, strings.Fields(ev.Description)...)
 				}
-				mentionWords = append(mentionWords, strings.Fields(view.Text)...)
 
 				cues := memory.RecallCues{
 					Percepts:      percepts,
@@ -928,37 +927,39 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 	}
 	s.mu.Unlock()
 
+	// 10. RECORD TURNS IN ACTOR MINDS (WORKING BUFFER)
+	for _, rt := range resolvedTurns {
+		if rt.candidate.entity.Mind != nil && rt.candidate.entity.Mind.Mind != nil {
+			var percepts []memory.Percept
+			for _, p := range rt.candidate.view.Perceivable {
+				percepts = append(percepts, memory.Percept{
+					EntityID: string(p.ID),
+					LOD:      int(rt.candidate.view.Seen[p.ID]),
+					Name:     p.Name,
+				})
+			}
+			rt.candidate.entity.Mind.Mind.RecordTurn(memory.Turn{
+				Tick:       currentTick,
+				Time:       s.Clock.CurrentTime(),
+				SceneID:    string(rt.candidate.sceneID),
+				LocationID: string(rt.candidate.spaceID),
+				Perception: rt.candidate.stimulus,
+				Perceived:  percepts,
+				Cognition:  rt.reaction.Cognition,
+				Action: memory.ActionRecord{
+					Type:    rt.reaction.Action.Type.String(),
+					Action:  rt.reaction.Action.Action,
+					Targets: rt.reaction.Action.Targets,
+				},
+			})
+		}
+	}
+
 	// 11. LAUNCH BACKGROUND THOUGHT DISTILLERS CONCURRENTLY
 	if s.Distiller != nil {
 		for _, rt := range resolvedTurns {
 			if rt.candidate.entity.Mind == nil {
 				continue
-			}
-
-			// Record turn in actor's Mind Working Buffer
-			if rt.candidate.entity.Mind.Mind != nil {
-				var percepts []memory.Percept
-				for _, p := range rt.candidate.view.Perceivable {
-					percepts = append(percepts, memory.Percept{
-						EntityID: string(p.ID),
-						LOD:      int(rt.candidate.view.Seen[p.ID]),
-						Name:     p.Name,
-					})
-				}
-				rt.candidate.entity.Mind.Mind.RecordTurn(memory.Turn{
-					Tick:       currentTick,
-					Time:       s.Clock.CurrentTime(),
-					SceneID:    string(rt.candidate.sceneID),
-					LocationID: string(rt.candidate.spaceID),
-					Perception: rt.candidate.stimulus,
-					Perceived:  percepts,
-					Cognition:  rt.reaction.Cognition,
-					Action: memory.ActionRecord{
-						Type:    rt.reaction.Action.Type.String(),
-						Action:  rt.reaction.Action.Action,
-						Targets: rt.reaction.Action.Targets,
-					},
-				})
 			}
 
 			_, isHuman := rt.candidate.entity.Controller.(*HumanController)
@@ -998,42 +999,27 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 			}(rt.candidate.entity.Mind, distInput, distChan)
 
 			// Check if actor's working buffer needs consolidation
-			if s.Consolidator != nil && rt.candidate.entity.Mind.Mind != nil && rt.candidate.entity.Mind.Mind.Buffer().NeedsConsolidation() {
-				buffer := rt.candidate.entity.Mind.Mind.Buffer()
-				unconsolidated := buffer.UnconsolidatedTurns()
-				if len(unconsolidated) > 0 {
-					fromSeq := unconsolidated[0].Seq
-					toSeq := unconsolidated[len(unconsolidated)-1].Seq
+			if s.Consolidator != nil && rt.candidate.entity.Mind != nil && rt.candidate.entity.Mind.Mind != nil {
+				if job, shouldConsolidate := rt.candidate.entity.Mind.Mind.StartConsolidation(); shouldConsolidate {
 					consInput := ConsolidateInput{
 						ActorID:      rt.candidate.entity.ID,
 						ActorName:    rt.candidate.entity.Name,
 						Personality:  rt.candidate.entity.Mind.Profile.Personality,
 						SceneID:      string(rt.candidate.sceneID),
 						LocationID:   string(rt.candidate.spaceID),
-						FromSeq:      fromSeq,
-						ToSeq:        toSeq,
-						Turns:        unconsolidated,
+						FromSeq:      job.FromSeq,
+						ToSeq:        job.ToSeq,
+						Turns:        job.Turns,
 						IsSceneClose: false,
 					}
-					go func(mind *actor.Actor, in ConsolidateInput) {
+					go func(mind *actor.Actor, in ConsolidateInput, j memory.ConsolidateJob) {
 						cRes, cErr := s.Consolidator.Consolidate(ctx, in)
 						if cErr == nil {
-							for _, b := range cRes.Beats {
-								mind.Mind.AppendBeat(mind.Mind.OpenEpisodeID(), b)
-							}
-							mind.Mind.Buffer().CommitConsolidation(in.ToSeq)
+							mind.Mind.FinishConsolidation(j, cRes.Beats)
 						} else {
-							_, beatText, fSeq, tSeq := mind.Mind.Buffer().DegradedEvictionFallback()
-							if beatText != "" {
-								mind.Mind.AppendBeat(mind.Mind.OpenEpisodeID(), memory.Beat{
-									FromSeq:  fSeq,
-									ToSeq:    tSeq,
-									Text:     beatText,
-									Degraded: true,
-								})
-							}
+							mind.Mind.AbortConsolidation()
 						}
-					}(rt.candidate.entity.Mind, consInput)
+					}(rt.candidate.entity.Mind, consInput, job)
 				}
 			}
 		}
@@ -1104,6 +1090,56 @@ func (s *Simulation) Run(ctx context.Context, maxTicks int, onTick func(report T
 	}
 
 	return allReports, nil
+}
+
+// CloseAllEpisodes closes open episodes across all actors and finalizes them.
+func (s *Simulation) CloseAllEpisodes(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, entity := range s.Entities {
+		if entity.Mind != nil && entity.Mind.Mind != nil {
+			openEpID := entity.Mind.Mind.OpenEpisodeID()
+			if openEpID != "" {
+				entity.Mind.Mind.CloseAllOpenEpisodes(s.Clock.TickCount, s.Clock.CurrentTime())
+				if s.Consolidator != nil {
+					buffer := entity.Mind.Mind.Buffer()
+					unconsolidated := buffer.UnconsolidatedTurns()
+					loc, _ := s.whereLocked(entity.ID)
+					locID := ""
+					if loc != nil {
+						locID = string(loc.ID)
+					}
+					var fromSeq, toSeq int64
+					if len(unconsolidated) > 0 {
+						fromSeq = unconsolidated[0].Seq
+						toSeq = unconsolidated[len(unconsolidated)-1].Seq
+					}
+					consInput := ConsolidateInput{
+						ActorID:      entity.ID,
+						ActorName:    entity.Name,
+						Personality:  entity.Mind.Profile.Personality,
+						SceneID:      "",
+						LocationID:   locID,
+						FromSeq:      fromSeq,
+						ToSeq:        toSeq,
+						Turns:        unconsolidated,
+						IsSceneClose: true,
+					}
+					cRes, err := s.Consolidator.Consolidate(ctx, consInput)
+					if err == nil {
+						for _, b := range cRes.Beats {
+							entity.Mind.Mind.AppendBeat(openEpID, b)
+						}
+						entity.Mind.Mind.FinalizeEpisodeClose(openEpID, cRes.Title, cRes.Summary, cRes.Tone, cRes.Importance, cRes.FormativeSubjectIDs)
+						if toSeq > 0 {
+							buffer.CommitConsolidation(toSeq)
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // AdvanceClock increments tick count by ticks.

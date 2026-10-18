@@ -24,7 +24,7 @@ func RenderPromptSections(
 	}
 
 	// 1. Section 4: Self-Dossier
-	if res.SelfDossier != nil {
+	if res.SelfDossier != nil && (len(res.SelfDossier.Claims) > 0 || res.SelfDossier.Impression != "") {
 		var sb strings.Builder
 		sb.WriteString("YOUR CURRENT STATE OF MIND:\n")
 		if res.SelfDossier.Impression != "" {

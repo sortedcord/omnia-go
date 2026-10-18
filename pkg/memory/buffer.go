@@ -95,29 +95,51 @@ func (b *WorkingBuffer) AllTurns() []Turn {
 // ReplayTurns returns the recent turns to include in the LLM chat history.
 // It respects the token budget while guaranteeing at least minVerbatimTurns.
 func (b *WorkingBuffer) ReplayTurns() []Turn {
-	if len(b.turns) <= b.minVerbatimTurns {
-		res := make([]Turn, len(b.turns))
+	n := len(b.turns)
+	if n <= b.minVerbatimTurns {
+		res := make([]Turn, n)
 		copy(res, b.turns)
 		return res
 	}
 
-	// Always include at least minVerbatimTurns
-	startIdx := len(b.turns) - b.minVerbatimTurns
+	// Always guarantee the most recent minVerbatimTurns
+	cutoff := n - b.minVerbatimTurns
+	startIdx := cutoff
 
-	// Walk backwards to include as many turns as fit within budgetTokens
 	currentTokens := 0
-	for i := len(b.turns) - 1; i >= 0; i-- {
+	for i := n - 1; i >= cutoff; i-- {
+		currentTokens += estimateTurnTokens(b.turns[i])
+	}
+
+	// Expand backwards only while total tokens stay within budgetTokens
+	for i := cutoff - 1; i >= 0; i-- {
 		tTokens := estimateTurnTokens(b.turns[i])
-		if i < startIdx && currentTokens+tTokens > b.budgetTokens {
+		if currentTokens+tTokens > b.budgetTokens {
 			break
 		}
 		currentTokens += tTokens
 		startIdx = i
 	}
 
-	res := make([]Turn, len(b.turns)-startIdx)
+	res := make([]Turn, n-startIdx)
 	copy(res, b.turns[startIdx:])
 	return res
+}
+
+// RestoreTurns directly restores turns and watermarks without renumbering sequence IDs.
+func (b *WorkingBuffer) RestoreTurns(turns []Turn, lastConsolidatedSeq, nextSeq int64) {
+	b.turns = make([]Turn, len(turns))
+	copy(b.turns, turns)
+	b.lastConsolidatedSeq = lastConsolidatedSeq
+	b.nextSeq = nextSeq
+	if b.nextSeq <= 0 {
+		b.nextSeq = 1
+		for _, t := range turns {
+			if t.Seq >= b.nextSeq {
+				b.nextSeq = t.Seq + 1
+			}
+		}
+	}
 }
 
 // EstimatedTokens returns the total estimated token volume of all turns in the buffer.

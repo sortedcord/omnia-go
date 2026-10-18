@@ -73,11 +73,14 @@ func (m *Mind) ImportSnapshot(snap Snapshot) {
 	defer m.mu.Unlock()
 
 	m.ownerID = snap.OwnerID
-	m.buffer = NewWorkingBuffer(2500, 4)
+	var maxSeq int64 = 0
 	for _, t := range snap.Turns {
-		m.buffer.Append(t)
+		if t.Seq > maxSeq {
+			maxSeq = t.Seq
+		}
 	}
-	m.buffer.CommitConsolidation(snap.LastConsolidated)
+	m.buffer = NewWorkingBuffer(2500, 4)
+	m.buffer.RestoreTurns(snap.Turns, snap.LastConsolidated, maxSeq+1)
 
 	m.episodes = make(map[string]*Episode)
 	for _, ep := range snap.Episodes {

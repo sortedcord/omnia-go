@@ -140,8 +140,17 @@ func (a *Actor) AddThought(t Thought) Thought {
 	out := a.Memory.AddThought(t)
 	if a.Mind != nil {
 		subjectID := a.Profile.ID
-		if len(t.Links) > 0 {
+		// Intentions and feelings always belong to self-dossier
+		if t.Kind != ThoughtIntention && t.Kind != ThoughtFeeling && len(t.Links) > 0 {
 			subjectID = t.Links[0]
+			if _, exists := a.Mind.GetSubject(subjectID); !exists {
+				a.Mind.AddSubject(&memory.Subject{
+					ID:     subjectID,
+					Kind:   memory.SubjectPerson,
+					Names:  []string{subjectID},
+					Origin: memory.OriginAuthored,
+				})
+			}
 		}
 		a.Mind.AddClaim(subjectID, memory.Claim{
 			ID:         out.ID,

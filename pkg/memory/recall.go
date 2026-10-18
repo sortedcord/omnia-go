@@ -93,6 +93,7 @@ func ExecuteRecall(
 	for missSubj := range recog.ExpectationMiss {
 		res.ExpectationMisses = append(res.ExpectationMisses, missSubj)
 	}
+	sort.Strings(res.ExpectationMisses)
 
 	// 2. Activate Dossiers
 	type activatedDossier struct {
@@ -108,6 +109,7 @@ func ExecuteRecall(
 			mentionSet[trimmed] = true
 		}
 	}
+	rawMentionsText := strings.ToLower(strings.Join(cues.Mentions, " "))
 
 	var activations []activatedDossier
 
@@ -151,7 +153,11 @@ func ExecuteRecall(
 		// B. Named mention in sensory ingress (subject's names/aliases)
 		if hasSubj {
 			for _, name := range subj.Names {
-				if mentionSet[strings.ToLower(name)] {
+				lowerName := strings.ToLower(strings.TrimSpace(name))
+				if lowerName == "" {
+					continue
+				}
+				if mentionSet[lowerName] || (len(lowerName) > 2 && strings.Contains(rawMentionsText, lowerName)) {
 					if cfg.NamedMentionActivation > activation {
 						activation = cfg.NamedMentionActivation
 					}
@@ -205,9 +211,12 @@ func ExecuteRecall(
 		})
 	}
 
-	// Sort dossiers by score descending
+	// Sort dossiers by score descending with deterministic tie-breaker
 	sort.Slice(activations, func(i, j int) bool {
-		return activations[i].score > activations[j].score
+		if math.Abs(activations[i].score-activations[j].score) > 0.001 {
+			return activations[i].score > activations[j].score
+		}
+		return activations[i].dossier.SubjectID < activations[j].dossier.SubjectID
 	})
 
 	limitDossiers := cfg.MaxActivatedDossiers
@@ -327,9 +336,12 @@ func ExecuteRecall(
 		}
 	}
 
-	// Sort candidates descending by total score
+	// Sort candidates descending by total score with deterministic tie-breaker
 	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].breakdown.TotalScore > candidates[j].breakdown.TotalScore
+		if math.Abs(candidates[i].breakdown.TotalScore-candidates[j].breakdown.TotalScore) > 0.001 {
+			return candidates[i].breakdown.TotalScore > candidates[j].breakdown.TotalScore
+		}
+		return candidates[i].ep.ID < candidates[j].ep.ID
 	})
 
 	limitEps := cfg.MaxSurfacedEpisodes

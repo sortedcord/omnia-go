@@ -139,7 +139,12 @@ func main() {
 			}
 		}
 
-		if len(report.Thoughts) > 0 {
+		if report.Recall != nil && report.Recall.SelfDossier != nil && len(report.Recall.SelfDossier.Claims) > 0 {
+			fmt.Printf("\n--- State of Mind (Dossier Claims) ---\n")
+			for _, c := range report.Recall.SelfDossier.Claims {
+				fmt.Printf("  * [%-9s | salience: %.2f] %s\n", c.Kind, c.Salience, c.Content)
+			}
+		} else if len(report.Thoughts) > 0 {
 			fmt.Printf("\n--- State of Mind (Selected Thoughts) ---\n")
 			for _, th := range report.Thoughts {
 				fmt.Printf("  * [%s:%-9s | salience: %.2f] %s\n", th.ID, th.Kind, th.Salience, th.Content)
@@ -176,15 +181,33 @@ func main() {
 			i+1, ev.Tick, ev.Kind, ev.SourceName, ev.LocationID, ev.Description)
 	}
 
-	// 8. Final Thought Graphs
+	// 8. Final Dossiers & Mind State
 	fmt.Println("\n==================================================")
-	fmt.Println("           NELLY'S EVOLVED THOUGHT GRAPH          ")
+	fmt.Println("           NELLY'S EVOLVED DOSSIERS & CLAIMS      ")
 	fmt.Println("==================================================")
-	for _, th := range sc.NellyMind.ThoughtsSnapshot() {
-		linksStr := ""
-		if len(th.Links) > 0 {
-			linksStr = fmt.Sprintf(" [links: %s]", strings.Join(th.Links, ", "))
+	if sc.NellyMind.Mind != nil {
+		for _, d := range sc.NellyMind.Mind.DossiersSnapshot() {
+			if len(d.Claims) > 0 || d.Impression != "" {
+				subjName := d.SubjectID
+				if s, ok := sc.NellyMind.Mind.GetSubject(d.SubjectID); ok && len(s.Names) > 0 {
+					subjName = s.Names[0]
+				}
+				fmt.Printf("\n[Subject: %s (%s)]\n", subjName, d.SubjectID)
+				if d.Impression != "" {
+					fmt.Printf("  Impression: %s\n", d.Impression)
+				}
+				for _, c := range d.Claims {
+					fmt.Printf("  - [%-9s | salience: %.2f | conf: %.2f] %s\n", c.Kind, c.Salience, c.Conviction, c.Content)
+				}
+			}
 		}
-		fmt.Printf("- [%s:%-9s | salience: %.2f] %s%s\n", th.ID, th.Kind, th.Salience, th.Content, linksStr)
+	} else {
+		for _, th := range sc.NellyMind.ThoughtsSnapshot() {
+			linksStr := ""
+			if len(th.Links) > 0 {
+				linksStr = fmt.Sprintf(" [links: %s]", strings.Join(th.Links, ", "))
+			}
+			fmt.Printf("- [%s:%-9s | salience: %.2f] %s%s\n", th.ID, th.Kind, th.Salience, th.Content, linksStr)
+		}
 	}
 }
