@@ -17,6 +17,13 @@ import (
 // Option allows configuring a Simulation during initialization.
 type Option func(*Simulation)
 
+// WithSummarizer configures the LOD Perception Summarizer.
+func WithSummarizer(s Summarizer) Option {
+	return func(sim *Simulation) {
+		sim.Summarizer = s
+	}
+}
+
 // WithArbiter configures the physics referee that resolves intent into reality.
 func WithArbiter(a Arbiter) Option {
 	return func(sim *Simulation) {
