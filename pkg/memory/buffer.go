@@ -8,9 +8,10 @@ import (
 
 // Percept captures an entity observed in sensory perception during a turn.
 type Percept struct {
-	EntityID string `json:"entity_id"`
-	LOD      int    `json:"lod"`
-	Name     string `json:"name"`
+	EntityID string      `json:"entity_id"`
+	LOD      int         `json:"lod"`
+	Name     string      `json:"name"`
+	Kind     SubjectKind `json:"kind,omitempty"`
 }
 
 // ActionRecord represents an actor's manifest action emitted into the world.
@@ -22,16 +23,17 @@ type ActionRecord struct {
 
 // Turn captures one interaction cycle from the actor's subjective viewpoint.
 type Turn struct {
-	Seq        int64        `json:"seq"`      // Monotonic sequence number per actor
-	Tick       int          `json:"tick"`     // Simulation tick
-	Time       time.Time    `json:"time"`     // Simulated in-world timestamp
-	SceneID    string       `json:"scene_id"` // Episode boundary key
-	LocationID string       `json:"location_id"`
-	Perception string       `json:"perception"` // Subjective sensory text
-	Perceived  []Percept    `json:"perceived,omitempty"`
-	Cognition  string       `json:"cognition,omitempty"` // Cleaned private reasoning (not replayed in prompt)
-	Action     ActionRecord `json:"action"`
-	EpisodeID  string       `json:"episode_id,omitempty"` // Open episode this turn belongs to
+	Seq          int64        `json:"seq"`      // Monotonic sequence number per actor
+	Tick         int          `json:"tick"`     // Simulation tick
+	Time         time.Time    `json:"time"`     // Simulated in-world timestamp
+	SceneID      string       `json:"scene_id"` // Episode boundary key
+	LocationID   string       `json:"location_id"`
+	Perception   string       `json:"perception"` // Subjective sensory text
+	Perceived    []Percept    `json:"perceived,omitempty"`
+	Cognition    string       `json:"cognition,omitempty"` // Cleaned private reasoning (not replayed in prompt)
+	Action       ActionRecord `json:"action"`
+	EpisodeID    string       `json:"episode_id,omitempty"` // Open episode this turn belongs to
+	Consolidated bool         `json:"consolidated"`         // True if consolidated into an episode beat
 }
 
 // WorkingBuffer manages Tier 1 verbatim recent interaction history.
@@ -156,11 +158,16 @@ func (b *WorkingBuffer) NeedsConsolidation() bool {
 	return b.EstimatedTokens() > b.budgetTokens && b.UnconsolidatedCount() > b.minVerbatimTurns
 }
 
-// UnconsolidatedTurns returns turns with Seq > lastConsolidatedSeq.
+// UnconsolidatedTurns returns turns that have not yet been consolidated into beats.
 func (b *WorkingBuffer) UnconsolidatedTurns() []Turn {
+	return b.UnconsolidatedTurnsForEpisode("")
+}
+
+// UnconsolidatedTurnsForEpisode returns uncommitted turns strictly belonging to episodeID.
+func (b *WorkingBuffer) UnconsolidatedTurnsForEpisode(episodeID string) []Turn {
 	var res []Turn
 	for _, t := range b.turns {
-		if t.Seq > b.lastConsolidatedSeq {
+		if !t.Consolidated && (episodeID == "" || t.EpisodeID == episodeID) {
 			res = append(res, t)
 		}
 	}
@@ -169,24 +176,30 @@ func (b *WorkingBuffer) UnconsolidatedTurns() []Turn {
 
 // UnconsolidatedCount returns the number of turns waiting for consolidation.
 func (b *WorkingBuffer) UnconsolidatedCount() int {
-	count := 0
-	for _, t := range b.turns {
-		if t.Seq > b.lastConsolidatedSeq {
-			count++
-		}
-	}
-	return count
+	return len(b.UnconsolidatedTurns())
 }
 
-// CommitConsolidation advances the watermark and evicts consolidated turns that exceed budget.
+// CommitConsolidation advances the watermark and marks turns in range as consolidated.
 func (b *WorkingBuffer) CommitConsolidation(toSeq int64) {
+	b.CommitConsolidationForRange(1, toSeq, "")
+}
+
+// CommitConsolidationForRange marks turns within [fromSeq, toSeq] for episodeID as consolidated and evicts eligible turns.
+func (b *WorkingBuffer) CommitConsolidationForRange(fromSeq, toSeq int64, episodeID string) {
+	for i := range b.turns {
+		if b.turns[i].Seq >= fromSeq && b.turns[i].Seq <= toSeq {
+			if episodeID == "" || b.turns[i].EpisodeID == episodeID {
+				b.turns[i].Consolidated = true
+			}
+		}
+	}
 	if toSeq > b.lastConsolidatedSeq {
 		b.lastConsolidatedSeq = toSeq
 	}
+	b.evictConsolidatedTurns()
+}
 
-	// Only evict turns that are both:
-	// 1. Consolidated (Seq <= lastConsolidatedSeq)
-	// 2. Beyond minVerbatimTurns from the end
+func (b *WorkingBuffer) evictConsolidatedTurns() {
 	if len(b.turns) <= b.minVerbatimTurns {
 		return
 	}
@@ -194,7 +207,7 @@ func (b *WorkingBuffer) CommitConsolidation(toSeq int64) {
 	keepFrom := len(b.turns) - b.minVerbatimTurns
 	var active []Turn
 	for i, t := range b.turns {
-		if i >= keepFrom || t.Seq > b.lastConsolidatedSeq {
+		if i >= keepFrom || !t.Consolidated {
 			active = append(active, t)
 		}
 	}

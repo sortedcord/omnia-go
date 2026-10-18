@@ -220,3 +220,35 @@ func TestAuditCrossDossierUpsertReallocatesID(t *testing.T) {
 		t.Fatalf("expected claim ID to be re-allocated, but got duplicate ID 'c-shared-1'")
 	}
 }
+
+func TestAuditEnsureOpenEpisodeDoesNotLeakStuckIsConsolidating(t *testing.T) {
+	mind := NewMind("ruth", WithBudgetTokens(50))
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Episode 1
+	mind.EnsureOpenEpisode("scene-1", "lot-1", "Lot 1", 1, now)
+	mind.RecordTurn(Turn{SceneID: "scene-1", Perception: "turn in scene 1"})
+
+	// Transition to Episode 2 -> closes Episode 1 and issues closedJob
+	_, _, closedJob := mind.EnsureOpenEpisode("scene-2", "lot-2", "Lot 2", 2, now.Add(15*time.Minute))
+	if closedJob == nil {
+		t.Fatal("expected closedJob for scene-1")
+	}
+
+	// Commit consolidation of closedJob
+	mind.FinishConsolidation(*closedJob, []Beat{{Text: "Beat of scene 1"}})
+
+	// Record 10 turns in scene-2 to trigger rolling consolidation
+	for i := 0; i < 10; i++ {
+		mind.RecordTurn(Turn{SceneID: "scene-2", Perception: strings.Repeat("2", 100)})
+	}
+
+	// Rolling consolidation MUST be allowed (isConsolidating was cleared!)
+	rollJob, ok := mind.StartConsolidation()
+	if !ok {
+		t.Fatal("StartConsolidation was blocked by stuck isConsolidating flag")
+	}
+	if rollJob.EpisodeID != "ep-ruth-2" {
+		t.Fatalf("expected rolling job for ep-ruth-2, got %s", rollJob.EpisodeID)
+	}
+}

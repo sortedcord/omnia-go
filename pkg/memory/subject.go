@@ -165,13 +165,16 @@ func AutoRegisterPercepts(subjects map[string]*Subject, dossiers map[string]*Dos
 			name = p.EntityID
 		}
 
-		kind := SubjectObject
-		lowerName := strings.ToLower(name)
-		lowerID := strings.ToLower(p.EntityID)
-		if strings.Contains(lowerName, "room") || strings.Contains(lowerName, "kitchen") || strings.Contains(lowerName, "apartment") ||
-			strings.Contains(lowerName, "hallway") || strings.Contains(lowerName, "deck") || strings.Contains(lowerName, "cabin") ||
-			strings.Contains(lowerID, "room") || strings.Contains(lowerID, "kitchen") || strings.Contains(lowerID, "lot") {
-			kind = SubjectPlace
+		kind := p.Kind
+		if kind == "" {
+			kind = SubjectObject
+			lowerName := strings.ToLower(name)
+			lowerID := strings.ToLower(p.EntityID)
+			if strings.Contains(lowerName, "room") || strings.Contains(lowerName, "kitchen") || strings.Contains(lowerName, "apartment") ||
+				strings.Contains(lowerName, "hallway") || strings.Contains(lowerName, "deck") || strings.Contains(lowerName, "cabin") ||
+				strings.Contains(lowerID, "room") || strings.Contains(lowerID, "kitchen") || strings.Contains(lowerID, "lot") {
+				kind = SubjectPlace
+			}
 		}
 
 		subj := &Subject{

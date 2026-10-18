@@ -158,7 +158,7 @@ func (a *Actor) AddThought(t Thought) Thought {
 
 				name := subjectID
 				if kind == memory.SubjectPlace || kind == memory.SubjectObject {
-					name = strings.Title(strings.ReplaceAll(subjectID, "-", " "))
+					name = formatSubjectName(subjectID)
 				}
 
 				a.Mind.AddSubject(&memory.Subject{
@@ -185,6 +185,16 @@ func (a *Actor) AddThought(t Thought) Thought {
 		})
 	}
 	return out
+}
+
+func formatSubjectName(s string) string {
+	parts := strings.Split(s, "-")
+	for i, p := range parts {
+		if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // ThoughtsSnapshot returns a thread-safe copy of the actor's current thoughts.

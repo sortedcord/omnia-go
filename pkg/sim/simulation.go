@@ -559,6 +559,12 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				recallRes := c.entity.Mind.Mind.Recall(cues)
 				c.recall = &recallRes
 				c.selfContext, c.dossiersContext, c.memoriesContext = memory.RenderPromptSections(recallRes, c.entity.Mind.Mind.SubjectsSnapshotMap(), 300, 700, 900)
+				if c.selfContext != "" {
+					c.thoughts = c.selfContext
+					if c.dossiersContext != "" {
+						c.thoughts += "\n\n" + c.dossiersContext
+					}
+				}
 			}
 		}
 	}
@@ -982,10 +988,21 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 		if rt.candidate.entity.Mind != nil && rt.candidate.entity.Mind.Mind != nil {
 			var percepts []memory.Percept
 			for _, p := range rt.candidate.view.Perceivable {
+				pKind := memory.SubjectObject
+				s.mu.RLock()
+				if ent, ok := s.Entities[p.ID]; ok {
+					if ent.Space != nil {
+						pKind = memory.SubjectPlace
+					} else if ent.Mind != nil {
+						pKind = memory.SubjectPerson
+					}
+				}
+				s.mu.RUnlock()
 				percepts = append(percepts, memory.Percept{
 					EntityID: string(p.ID),
 					LOD:      int(rt.candidate.view.Seen[p.ID]),
 					Name:     p.Name,
+					Kind:     pKind,
 				})
 			}
 			rt.candidate.entity.Mind.Mind.RecordTurn(memory.Turn{
@@ -1048,9 +1065,13 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 				}
 				out <- res
 			}(rt.candidate.entity.Mind, distInput, distChan)
+		}
+	}
 
-			// Check if actor's working buffer needs consolidation
-			if s.Consolidator != nil && rt.candidate.entity.Mind != nil && rt.candidate.entity.Mind.Mind != nil {
+	// 12. CHECK WORKING BUFFER CONSOLIDATION CONCURRENTLY
+	if s.Consolidator != nil {
+		for _, rt := range resolvedTurns {
+			if rt.candidate.entity.Mind != nil && rt.candidate.entity.Mind.Mind != nil {
 				if job, shouldConsolidate := rt.candidate.entity.Mind.Mind.StartConsolidation(); shouldConsolidate {
 					var availSubjIDs []string
 					for _, s := range rt.candidate.entity.Mind.Mind.SubjectsSnapshot() {
@@ -1083,7 +1104,7 @@ func (s *Simulation) Step(ctx context.Context) ([]TickReport, error) {
 		}
 	}
 
-	// 12. ADVANCE CLOCK & DECAY FOCUS
+	// 13. ADVANCE CLOCK & DECAY FOCUS
 	s.DecayFocus(0.70)
 
 	s.mu.Lock()
