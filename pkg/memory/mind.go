@@ -226,6 +226,21 @@ func (m *Mind) findOrCreateSubjectForEntityLocked(entityID string, defaultName s
 	return newID
 }
 
+// SetCountersPast advances the internal sequence counters to at least the given values.
+func (m *Mind) SetCountersPast(nextSubj, nextClaim, nextEp int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if nextSubj > m.nextSubjectSeq {
+		m.nextSubjectSeq = nextSubj
+	}
+	if nextClaim > m.nextClaimSeq {
+		m.nextClaimSeq = nextClaim
+	}
+	if nextEp > m.nextEpisodeSeq {
+		m.nextEpisodeSeq = nextEp
+	}
+}
+
 // EnsureOpenEpisode checks if the scene changed or if an episode needs to be opened.
 // If the scene changed, it closes the existing episode and returns a closed consolidation job.
 func (m *Mind) EnsureOpenEpisode(sceneID, locationID, locationName string, tick int, inWorldTime time.Time) (epID string, newlyOpened bool, closedJob *ConsolidateJob) {

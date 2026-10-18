@@ -106,17 +106,11 @@ func New(clock Clock, opts ...Option) *Simulation {
 	}
 
 	seed := time.Now().UnixNano()
-	defaultLLM := llm.DefaultClient()
 
 	sim := &Simulation{
 		Clock:           clock,
 		Entities:        make(map[EntityID]*Entity),
 		FocusMap:        make(map[EntityID]map[EntityID]float64),
-		Summarizer:      NewLLMSummarizer(defaultLLM, "gemini-3.5-flash-lite"),
-		Arbiter:         NewLLMArbiter(defaultLLM, "gemini-3.5-flash-lite"),
-		Broadcaster:     NewLLMBroadcaster(defaultLLM, "gemini-3.5-flash-lite"),
-		Distiller:       NewLLMDistiller(defaultLLM, "gemini-3.5-flash-lite"),
-		Consolidator:    NewLLMConsolidator(defaultLLM, "gemini-3.5-flash-lite"),
 		Seed:            seed,
 		RNG:             rand.New(rand.NewSource(seed)),
 		pendingIntent:   make(map[EntityID]string),
@@ -131,6 +125,26 @@ func New(clock Clock, opts ...Option) *Simulation {
 
 	for _, opt := range opts {
 		opt(sim)
+	}
+
+	// Only instantiate default LLM components if not provided by options
+	if sim.Summarizer == nil || sim.Arbiter == nil || sim.Broadcaster == nil || sim.Distiller == nil || sim.Consolidator == nil {
+		defaultLLM := llm.DefaultClient()
+		if sim.Summarizer == nil {
+			sim.Summarizer = NewLLMSummarizer(defaultLLM, "gemini-3.5-flash-lite")
+		}
+		if sim.Arbiter == nil {
+			sim.Arbiter = NewLLMArbiter(defaultLLM, "gemini-3.5-flash-lite")
+		}
+		if sim.Broadcaster == nil {
+			sim.Broadcaster = NewLLMBroadcaster(defaultLLM, "gemini-3.5-flash-lite")
+		}
+		if sim.Distiller == nil {
+			sim.Distiller = NewLLMDistiller(defaultLLM, "gemini-3.5-flash-lite")
+		}
+		if sim.Consolidator == nil {
+			sim.Consolidator = NewLLMConsolidator(defaultLLM, "gemini-3.5-flash-lite")
+		}
 	}
 
 	return sim
@@ -149,7 +163,15 @@ func (s *Simulation) SpawnSpace(id EntityID, name, description string, enterable
 
 // SpawnActor creates an entity housing an autonomous mind and places it inside a parent entity.
 func (s *Simulation) SpawnActor(id EntityID, a *actor.Actor, initialParentID EntityID, visualDescription string) (*Entity, error) {
+	return s.SpawnActorWithOptions(id, a, initialParentID, visualDescription, 0.8)
+}
+
+// SpawnActorWithOptions creates an actor entity with explicit visual description and initial salience.
+func (s *Simulation) SpawnActorWithOptions(id EntityID, a *actor.Actor, initialParentID EntityID, visualDescription string, salience float64) (*Entity, error) {
 	e := NewActorEntity(id, a, visualDescription)
+	if salience > 0 {
+		e.Salience = salience
+	}
 	e.Parent = initialParentID
 	e.Link = Link{Relation: RelIn}
 	if err := s.AddEntity(e); err != nil {
@@ -176,9 +198,20 @@ func (s *Simulation) SpawnItem(id EntityID, name, description string, parentID E
 
 // SpawnPortal creates an opening or passageway between two spaces.
 func (s *Simulation) SpawnPortal(id EntityID, name string, fromSpaceID, toSpaceID EntityID, direction string) (*Entity, error) {
+	return s.SpawnPortalWithOptions(id, name, "", fromSpaceID, toSpaceID, direction, false, false, false)
+}
+
+// SpawnPortalWithOptions creates a portal with explicit description, closed, locked, and transparent settings.
+func (s *Simulation) SpawnPortalWithOptions(id EntityID, name, description string, fromSpaceID, toSpaceID EntityID, direction string, closed, locked, transparent bool) (*Entity, error) {
 	e := NewPortalEntity(id, name, toSpaceID, direction)
+	e.Description = description
 	e.Parent = fromSpaceID
 	e.Link = Link{Relation: RelIn}
+	if e.Portal != nil {
+		e.Portal.Closed = closed
+		e.Portal.Locked = locked
+		e.Portal.Transparent = transparent
+	}
 	if err := s.AddEntity(e); err != nil {
 		return nil, err
 	}
